@@ -7,10 +7,13 @@ __pycache__/
 .ipynb_checkpoints/
 
 # Large external model repositories and weights are kept local.
-CLRNet/
 Ultra-Fast-Lane-Detection/
 weights/
 **/weights/
+CLRNet/.venv-clrnet-demo/
+CLRNet/weights/
+CLRNet/mmcv/
+CLRNet/demo_image.py
 
 # Generated outputs.
 outputs/
@@ -18,4 +21,3 @@ outputs/
 *.jpg
 !data/*.png
 !data/*.jpg
-

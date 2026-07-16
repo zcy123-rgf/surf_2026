@@ -1,0 +1,89 @@
+diff --git a/clrnet/ops/nms.py b/clrnet/ops/nms.py
+index e92f274..82be0a0 100644
+--- a/clrnet/ops/nms.py
++++ b/clrnet/ops/nms.py
+@@ -26,8 +26,36 @@
+ # OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
+ # OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+ 
+-from . import nms_impl
++import torch
++
++try:
++    from . import nms_impl
++except ImportError:
++    nms_impl = None
+ 
+ 
+ def nms(boxes, scores, overlap, top_k):
+-    return nms_impl.nms_forward(boxes, scores, overlap, top_k)
++    if nms_impl is not None:
++        return nms_impl.nms_forward(boxes, scores, overlap, top_k)
++
++    order = torch.argsort(scores, descending=True)
++    keep = []
++
++    def lane_distance(a, b):
++        ax = a[5:]
++        bx = b[5:]
++        valid = (ax >= 0) & (bx >= 0)
++        if valid.sum() == 0:
++            return torch.tensor(float("inf"), device=boxes.device)
++        return torch.mean(torch.abs(ax[valid] - bx[valid]))
++
++    for idx in order:
++        if len(keep) >= top_k:
++            break
++        if all(lane_distance(boxes[idx], boxes[kept]) >= overlap for kept in keep):
++            keep.append(idx)
++
++    keep_tensor = torch.zeros(top_k, dtype=torch.long, device=boxes.device)
++    if keep:
++        keep_tensor[:len(keep)] = torch.stack(keep)
++    return keep_tensor, len(keep), None
+diff --git a/clrnet/utils/lane.py b/clrnet/utils/lane.py
+index a4b450e..749b156 100644
+--- a/clrnet/utils/lane.py
++++ b/clrnet/utils/lane.py
+@@ -1,6 +1,10 @@
+-from scipy.interpolate import InterpolatedUnivariateSpline
+ import numpy as np
+ 
++try:
++    from scipy.interpolate import InterpolatedUnivariateSpline
++except ImportError:
++    InterpolatedUnivariateSpline = None
++
+ 
+ class Lane:
+     def __init__(self, points=None, invalid_value=-2., metadata=None):
+@@ -8,10 +12,13 @@ class Lane:
+         self.curr_iter = 0
+         self.points = points
+         self.invalid_value = invalid_value
+-        self.function = InterpolatedUnivariateSpline(points[:, 1],
+-                                                     points[:, 0],
+-                                                     k=min(3,
+-                                                           len(points) - 1))
++        if InterpolatedUnivariateSpline is not None:
++            self.function = InterpolatedUnivariateSpline(points[:, 1],
++                                                         points[:, 0],
++                                                         k=min(3,
++                                                               len(points) - 1))
++        else:
++            self.function = None
+         self.min_y = points[:, 1].min() - 0.01
+         self.max_y = points[:, 1].max() + 0.01
+ 
+@@ -21,7 +28,10 @@ class Lane:
+         return '[Lane]\n' + str(self.points) + '\n[/Lane]'
+ 
+     def __call__(self, lane_ys):
+-        lane_xs = self.function(lane_ys)
++        if self.function is not None:
++            lane_xs = self.function(lane_ys)
++        else:
++            lane_xs = np.interp(lane_ys, self.points[:, 1], self.points[:, 0])
+ 
+         lane_xs[(lane_ys < self.min_y) |
+                 (lane_ys > self.max_y)] = self.invalid_value

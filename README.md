@@ -28,27 +28,46 @@ The old Hough detector is kept as a fallback with `--detector hough`.
 
 ## Local Setup
 
-The repository does not commit large model weights or cloned third-party model repositories. Locally, keep CLRNet next to this project:
+CLRNet is tracked as a git submodule so every teammate uses the same upstream commit.
 
 ```text
 surf_2026/
   run_demo.py
   surf_bev/
   data/
-  CLRNet/                 # local only, ignored by git
+  CLRNet/                 # git submodule
 ```
 
-Install dependencies:
+Clone with submodules:
+
+```bash
+git clone --recurse-submodules git@github.com:zcy123-rgf/surf_2026.git
+cd surf_2026
+```
+
+If the repository was already cloned without submodules:
+
+```bash
+git submodule update --init --recursive
+```
+
+### Mac demo setup
+
+For the Mac CPU/MPS demo, run:
+
+```bash
+bash scripts/setup_clrnet_mac.sh
+```
+
+This script creates `CLRNet/.venv-clrnet-demo`, downloads the official CULane ResNet-18 weight, and applies the small local compatibility patch needed for Mac/no-CUDA inference.
+
+### General Python setup
+
+For the project-level fallback detector and utilities:
 
 ```bash
 python3 -m venv .venv
 .venv/bin/pip install -r requirements.txt
-```
-
-For the current Mac demo, the existing local CLRNet environment can also be used:
-
-```bash
-CLRNet/.venv-clrnet-demo/bin/python run_demo.py
 ```
 
 ## Single-Frame Demo
