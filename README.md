@@ -97,9 +97,32 @@ Output:
 outputs/surf_bev/multi_frame_fused_bev.jpg
 ```
 
+## Data Needed For Real Fusion
+
+The sample images in `data/` are enough to prove that the code path runs, but they are not enough for accurate multi-frame fusion. For metric BEV fusion, prepare:
+
+```text
+image_2/
+  um_000000.png
+  um_000001.png
+  um_000002.png
+  ...
+
+calib/
+  um_000000.txt
+  um_000001.txt
+  ...
+
+poses/
+  00.txt
+```
+
+The calibration file must contain KITTI-style `P2`, `R0_rect`, and `Tr_velo_to_cam` lines. The pose file should contain one 3x4 camera pose per frame, as in KITTI odometry.
+
+If you only have images and no odometry poses, the project can still generate single-frame BEV images, but it cannot correctly align lanes from multiple frames into one map.
+
 ## Notes
 
 - `calib` and `poses` are required for true multi-frame fusion.
 - Without calibration, the single-frame demo uses approximate camera intrinsics so the BEV output is only a runnable visualization, not metric-accurate.
 - For production-quality results, fine-tune CLRNet on the project camera/data distribution and tune `camera-height`, `pitch-deg`, `x-range`, and `z-range`.
-
