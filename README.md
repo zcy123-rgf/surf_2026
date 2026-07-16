@@ -1,1 +1,105 @@
-# surf_2026
+# SURF 2026 Lane BEV Fusion
+
+This project upgrades the original BEV notebook pipeline by replacing the hand-built Hough lane detector with a CLRNet lane detector adapter.
+
+## Why CLRNet
+
+The BEV module needs lane polylines that are stable across frames. CLRNet is the better fit here because it outputs lane-level curves directly: each lane is represented by ordered image points. That is much easier to project into ground coordinates and fuse over time than a row-classification output or raw edge segments.
+
+Ultra-Fast-Lane-Detection is still useful for fast image-space lane demos, but CLRNet gives cleaner structured lane curves for:
+
+- BEV projection
+- multi-frame alignment
+- lane-map accumulation
+- later trajectory or drivable-area logic
+
+## Pipeline
+
+```text
+image
+  -> CLRNet lane detector
+  -> image-space lane polylines
+  -> IPM: image points to ground X/Z
+  -> optional pose alignment across frames
+  -> BEV lane map
+```
+
+The old Hough detector is kept as a fallback with `--detector hough`.
+
+## Local Setup
+
+The repository does not commit large model weights or cloned third-party model repositories. Locally, keep CLRNet next to this project:
+
+```text
+surf_2026/
+  run_demo.py
+  surf_bev/
+  data/
+  CLRNet/                 # local only, ignored by git
+```
+
+Install dependencies:
+
+```bash
+python3 -m venv .venv
+.venv/bin/pip install -r requirements.txt
+```
+
+For the current Mac demo, the existing local CLRNet environment can also be used:
+
+```bash
+CLRNet/.venv-clrnet-demo/bin/python run_demo.py
+```
+
+## Single-Frame Demo
+
+```bash
+CLRNet/.venv-clrnet-demo/bin/python run_demo.py \
+  --mode single \
+  --detector clrnet \
+  --image data/000001_original.jpg \
+  --output-dir outputs/surf_bev
+```
+
+Outputs:
+
+```text
+outputs/surf_bev/single_frame_lanes.jpg
+outputs/surf_bev/single_frame_bev.jpg
+```
+
+If CLRNet is unavailable, run the notebook-style fallback:
+
+```bash
+python run_demo.py --mode single --detector hough --image data/000001_original.jpg
+```
+
+## Multi-Frame Fusion
+
+For KITTI-style data, provide calibration and pose files:
+
+```bash
+python run_demo.py \
+  --mode multi \
+  --detector clrnet \
+  --image-dir /path/to/data_road/testing/image_2 \
+  --image-pattern 'um_{frame_id:06d}.png' \
+  --calib /path/to/data_road/testing/calib/um_000000.txt \
+  --poses /path/to/poses/00.txt \
+  --frame-ids 0,1,2 \
+  --ref-id 0 \
+  --output-dir outputs/surf_bev
+```
+
+Output:
+
+```text
+outputs/surf_bev/multi_frame_fused_bev.jpg
+```
+
+## Notes
+
+- `calib` and `poses` are required for true multi-frame fusion.
+- Without calibration, the single-frame demo uses approximate camera intrinsics so the BEV output is only a runnable visualization, not metric-accurate.
+- For production-quality results, fine-tune CLRNet on the project camera/data distribution and tune `camera-height`, `pitch-deg`, `x-range`, and `z-range`.
+

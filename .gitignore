@@ -1,0 +1,21 @@
+.DS_Store
+.idea/
+.venv/
+**/.venv/
+__pycache__/
+*.pyc
+.ipynb_checkpoints/
+
+# Large external model repositories and weights are kept local.
+CLRNet/
+Ultra-Fast-Lane-Detection/
+weights/
+**/weights/
+
+# Generated outputs.
+outputs/
+*.png
+*.jpg
+!data/*.png
+!data/*.jpg
+
