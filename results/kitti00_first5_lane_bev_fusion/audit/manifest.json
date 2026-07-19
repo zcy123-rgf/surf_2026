@@ -363,7 +363,7 @@
     {
       "path": "07_manual_comparison/audit/manual_vs_clrnet_audit.json",
       "bytes": 16754,
-      "sha256": "fba9e3b698307a0b95657283bbc5d89070975c2ecdfae73842db84092bea74ee"
+      "sha256": "f7739b224ae65c4b0bd9430ad8094419f4a41d14630aa548572b52bcf71d3c5d"
     },
     {
       "path": "07_manual_comparison/code/ransac_denoise.py",
@@ -372,8 +372,8 @@
     },
     {
       "path": "07_manual_comparison/code/run_manual_comparison.py",
-      "bytes": 20064,
-      "sha256": "f455613c943014d3a39b2bca572543b72dd9d1edf9aa7b616c494d77b7944fc3"
+      "bytes": 21729,
+      "sha256": "8ba4b7974fbb61dd97af8160d6038a7e9f63ac613c2234aaf516ac679846b021"
     },
     {
       "path": "07_manual_comparison/data/clrnet_lanes_kitti_ordered.json",
@@ -387,8 +387,8 @@
     },
     {
       "path": "07_manual_comparison/README.md",
-      "bytes": 2690,
-      "sha256": "c6fd4f4b0951f3fddfadf1e75f6f63f31a3c74de93d060e4e6c1e72469df5545"
+      "bytes": 3080,
+      "sha256": "1d51d6127c3f9e88b1d458115efd1f3c5c1b189202994a0ec42eb913300d0837"
     },
     {
       "path": "07_manual_comparison/results/01_manual_annotations_five_frames.png",
@@ -407,8 +407,8 @@
     },
     {
       "path": "07_manual_comparison/results/04_manual_vs_clrnet_fusion_comparison.png",
-      "bytes": 212198,
-      "sha256": "d118e0d561bdc2e90ef6dbda0023d8dfb8bc572b72d1fcda31811f35f3d663b8"
+      "bytes": 200385,
+      "sha256": "7f3cdb87cd91e663024231a0a85b72d73c3f38db6ef4a9b858e7cd583543a4c9"
     },
     {
       "path": "07_manual_comparison/results/frame_000000_manual_aligned_to_000004.png",

@@ -29,7 +29,7 @@
 - `results/01_manual_annotations_five_frames.png`：5 帧人工锚点及插值边界。
 - `results/02_manual_fusion_without_denoise.png`：人工标注未去噪融合。
 - `results/03_manual_fusion_with_ransac.png`：人工标注 RANSAC 后融合。
-- `results/04_manual_vs_clrnet_fusion_comparison.png`：人工与 CLRNet 融合成品对比。
+- `results/04_manual_vs_clrnet_fusion_comparison.png`：人工与 CLRNet 融合成品对比；沿用此前的白底米制坐标、逐帧着色、参考车原点和网格形式。
 - `results/frame_*_manual_bev.png`：逐帧人工 BEV。
 - `results/frame_*_manual_aligned_to_000004.png`：逐帧位姿对齐结果。
 
@@ -47,6 +47,8 @@
 - 人工 RANSAC 后成图覆盖保留约 `52.1%`；右侧各帧只保留 `20—39 / 56—59` 个点，主要原因是右侧遮挡段的人工插值跨帧不够一致。
 
 这些数值描述的是两种方法和多帧之间的一致程度，不是检测准确率。固定 IPM 会明显放大图像远处几十像素的标注差异，因此不能根据本次比较直接断言人工或 CLRNet 哪一个更接近真实道路边界。
+
+成品对比图只复用此前融合图的可视化形式，并未修改本次数据、位姿、BEV 范围或统计结果。此前示例使用了另一组帧和更长的纵向坐标范围；本图严格显示当前五帧实际有效范围 `Z[3,50] m`，并额外显示位于 `(0,0)` 的参考车位置。
 
 完整逐帧数据、参数和指标见 `audit/manual_vs_clrnet_audit.json`。
 

@@ -192,6 +192,52 @@ def render_frame_bev(lanes: list[np.ndarray]) -> np.ndarray:
     return add_bev_axes(image)
 
 
+def plot_metric_fusion(
+    axis: plt.Axes,
+    frames: list[list[np.ndarray]],
+    title: str,
+    point_count: int,
+    overlap_fraction: float,
+) -> None:
+    """Render aligned lane points in the white metric-axis style used previously."""
+    frame_colors = ["#1f77ff", "#16ad73", "#ffb000", "#a43df0", "#ff4057"]
+    for frame_id, (lanes, color) in enumerate(zip(frames, frame_colors)):
+        first_segment = True
+        for lane in lanes:
+            lane = np.asarray(lane, dtype=np.float64).reshape(-1, 2)
+            if len(lane) < 2:
+                continue
+            axis.plot(
+                lane[:, 0],
+                lane[:, 1],
+                color=color,
+                linewidth=1.8,
+                marker="o",
+                markersize=1.7,
+                label=f"frame {frame_id}" if first_segment else None,
+            )
+            first_segment = False
+
+    axis.scatter([0.0], [0.0], marker="x", s=70, linewidths=2.2, color="#e53935", zorder=5)
+    axis.annotate("参考车", (0.0, 0.0), xytext=(6, 5), textcoords="offset points", fontsize=8, color="#555555")
+    axis.set_xlim(-10.0, 10.0)
+    axis.set_ylim(-2.0, 50.0)
+    axis.set_xticks([-10.0, -5.0, 0.0, 5.0, 10.0])
+    axis.set_yticks([0.0, 10.0, 20.0, 30.0, 40.0, 50.0])
+    axis.set_xlabel("X：参考帧右向 [m]")
+    axis.set_ylabel("Z：参考帧前向 [m]")
+    axis.grid(True, color="#d8d8d8", linewidth=0.7, alpha=0.8)
+    axis.set_facecolor("white")
+    axis.set_box_aspect(2.15)
+    axis.set_title(
+        f"{title}\n{point_count} 点｜多帧重叠 {overlap_fraction * 100:.1f}%",
+        fontsize=12,
+        fontweight="bold",
+        pad=10,
+    )
+    axis.legend(loc="upper right", fontsize=7, frameon=True, ncol=1)
+
+
 def process_method(image_lanes: list[list[np.ndarray]], calib: dict, poses: list[np.ndarray]) -> dict:
     reference_pose = poses[4]
     projected_frames = []
@@ -361,27 +407,39 @@ def main() -> None:
         manual_result["den_fusion"]["binary"], clrnet_result["den_fusion"]["binary"], radius_px=12
     )
 
-    figure, axes = plt.subplots(1, 3, figsize=(16, 5.8), dpi=180)
-    panels = [
-        (manual_raw_image, f"人工标注融合：未去噪\n{manual_result['raw_points']}点，重叠{manual_result['raw_fusion']['overlap_fraction']*100:.1f}%"),
-        (manual_den_image, f"人工标注融合：RANSAC后\n{manual_result['kept_points']}点，重叠{manual_result['den_fusion']['overlap_fraction']*100:.1f}%"),
-        (clrnet_den_image, f"CLRNet融合：RANSAC后\n{clrnet_result['kept_points']}点，重叠{clrnet_result['den_fusion']['overlap_fraction']*100:.1f}%"),
-    ]
-    for axis, (image, title) in zip(axes, panels):
-        axis.imshow(cv2.cvtColor(image, cv2.COLOR_BGR2RGB))
-        axis.set_title(title, fontsize=13, fontweight="bold")
-        axis.axis("off")
-    figure.suptitle("人工边界标注与CLRNet：相同BEV、位姿、权重和RANSAC条件下的融合对比", fontsize=17, fontweight="bold")
+    figure, axes = plt.subplots(1, 3, figsize=(14.8, 8.3), dpi=180)
+    plot_metric_fusion(
+        axes[0],
+        manual_result["aligned_frames"],
+        "人工标注融合：未去噪",
+        manual_result["raw_points"],
+        manual_result["raw_fusion"]["overlap_fraction"],
+    )
+    plot_metric_fusion(
+        axes[1],
+        manual_result["denoised_frames"],
+        "人工标注融合：RANSAC 后",
+        manual_result["kept_points"],
+        manual_result["den_fusion"]["overlap_fraction"],
+    )
+    plot_metric_fusion(
+        axes[2],
+        clrnet_result["denoised_frames"],
+        "CLRNet 融合：RANSAC 后",
+        clrnet_result["kept_points"],
+        clrnet_result["den_fusion"]["overlap_fraction"],
+    )
+    figure.suptitle("五帧位姿融合：人工边界标注与 CLRNet 对比", fontsize=17, fontweight="bold")
     figure.text(
         0.5,
-        0.015,
+        0.025,
         f"人工–CLRNet图像横向平均差={agreement['overall_mean_abs_x_difference_px']:.1f}px；"
         f"BEV±12px容差一致率：去噪前{raw_tolerance_overlap*100:.1f}%、去噪后{den_tolerance_overlap*100:.1f}%。"
         "这些是方法一致性，不是准确率。",
         ha="center",
         fontsize=10,
     )
-    figure.tight_layout(rect=(0.01, 0.06, 0.99, 0.90))
+    figure.tight_layout(rect=(0.01, 0.075, 0.99, 0.92))
     comparison_path = OUTPUT_DIR / "04_manual_vs_clrnet_fusion_comparison.png"
     figure.savefig(comparison_path, bbox_inches="tight", facecolor="white")
     plt.close(figure)

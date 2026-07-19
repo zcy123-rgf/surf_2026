@@ -723,7 +723,7 @@
     "01_manual_annotations_five_frames.png": "cbe66b512d090909315b740abe6a025a0a3dd72a1836978062f817e816e508fd",
     "02_manual_fusion_without_denoise.png": "2527f26c6689235805c7e400e596d154d698d4644f8e89ceab98193f2fb954ee",
     "03_manual_fusion_with_ransac.png": "94b515af224180bdf450dc0af662c8cb24d00f5ef4164b151a1aca84bed6e2f7",
-    "04_manual_vs_clrnet_fusion_comparison.png": "d118e0d561bdc2e90ef6dbda0023d8dfb8bc572b72d1fcda31811f35f3d663b8",
+    "04_manual_vs_clrnet_fusion_comparison.png": "7f3cdb87cd91e663024231a0a85b72d73c3f38db6ef4a9b858e7cd583543a4c9",
     "frame_000000_manual_aligned_to_000004.png": "98c34b97502f5ed6ce4b4533253ba75f80776266e01715681116fbe7ea723911",
     "frame_000000_manual_annotation.png": "4fc7dff76be86057356d88d195056f8996c6a7d88980c0e484a2c77616689bc3",
     "frame_000000_manual_bev.png": "de204e42c9f249352b669fdf592ab50333554dcfa1e273cf314fe5ee66e3d515",
