@@ -30,6 +30,7 @@
 - `results/02_manual_fusion_without_denoise.png`：人工标注未去噪融合。
 - `results/03_manual_fusion_with_ransac.png`：人工标注 RANSAC 后融合。
 - `results/04_manual_vs_clrnet_fusion_comparison.png`：人工与 CLRNet 融合成品对比；沿用此前的白底米制坐标、逐帧着色、参考车原点和网格形式。
+- `../06_overview/complete_pipeline_with_manual_comparison.png`：单张完整总图，依次包含原始五帧、CLRNet 车道线提取、固定矩阵 BEV、位姿融合去噪前后和人工标注对比。
 - `results/frame_*_manual_bev.png`：逐帧人工 BEV。
 - `results/frame_*_manual_aligned_to_000004.png`：逐帧位姿对齐结果。
 

@@ -4,6 +4,8 @@
 
 ![完整流程对比](06_overview/all_stages_comparison.png)
 
+包含人工标注对比的总成品图：[`06_overview/complete_pipeline_with_manual_comparison.png`](06_overview/complete_pipeline_with_manual_comparison.png)。
+
 ## 目录
 
 - `01_original_frames/`：KITTI Odometry Sequence 00 的 `000000`—`000004` 原始左彩色相机图像。
@@ -11,7 +13,7 @@
 - `03_bev_projection/`：只对两条车道线掩膜做固定单应矩阵 BEV 投影。
 - `04_pose_aligned_bev/`：利用 `poses/00.txt` 将各帧车道线对齐到参考帧 `000004`。
 - `05_fusion/`：未去噪、RANSAC 去噪后，以及两者并排对比图。
-- `06_overview/`：原图—检测—BEV—融合的单张总对比图。
+- `06_overview/`：原图—检测—BEV—融合总图，以及追加人工标注对比后的完整总成品图。
 - `07_manual_comparison/`：人工逐点边界伪标注、人工融合前后、与 CLRNet 的同参数对比、坐标和完整审计数据。
 - `metadata/`：Sequence 00 相机标定与本次使用的前 5 帧位姿。
 - `audit/`：数据来源、参数、逐帧点数、指标和全部文件 SHA-256。

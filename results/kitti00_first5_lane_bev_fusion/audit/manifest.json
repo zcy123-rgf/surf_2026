@@ -361,9 +361,14 @@
       "sha256": "a0ebfbacfe7206c3fbad12fd0bedd2b72bec16a9989aa02e0401e5c900367c81"
     },
     {
+      "path": "06_overview/complete_pipeline_with_manual_comparison.png",
+      "bytes": 2979747,
+      "sha256": "ed2791e3956bf80f62af14f49e08f601298579e634f76cf3b1566b35ff628745"
+    },
+    {
       "path": "07_manual_comparison/audit/manual_vs_clrnet_audit.json",
-      "bytes": 16754,
-      "sha256": "f7739b224ae65c4b0bd9430ad8094419f4a41d14630aa548572b52bcf71d3c5d"
+      "bytes": 16941,
+      "sha256": "51ca968298c16f1479794ff45e663406625193768cefec6989cf0ff134fefda9"
     },
     {
       "path": "07_manual_comparison/code/ransac_denoise.py",
@@ -372,8 +377,8 @@
     },
     {
       "path": "07_manual_comparison/code/run_manual_comparison.py",
-      "bytes": 21729,
-      "sha256": "8ba4b7974fbb61dd97af8160d6038a7e9f63ac613c2234aaf516ac679846b021"
+      "bytes": 23081,
+      "sha256": "cf50426e301643b1742a207d4fe32b155496421e286371d23362067fecf432a5"
     },
     {
       "path": "07_manual_comparison/data/clrnet_lanes_kitti_ordered.json",
@@ -387,8 +392,8 @@
     },
     {
       "path": "07_manual_comparison/README.md",
-      "bytes": 3080,
-      "sha256": "1d51d6127c3f9e88b1d458115efd1f3c5c1b189202994a0ec42eb913300d0837"
+      "bytes": 3287,
+      "sha256": "1d7f7145db9b6004c836f4f505460689c01dddf77e1d91eaa3d00238f048d1a3"
     },
     {
       "path": "07_manual_comparison/results/01_manual_annotations_five_frames.png",
@@ -507,8 +512,8 @@
     },
     {
       "path": "README.md",
-      "bytes": 3582,
-      "sha256": "9f3c9988ce05710821fa98777463c8c55fa841e44acd9c12d6d9102b0e6cd1a3"
+      "bytes": 3789,
+      "sha256": "cb38376388bbb487a497b03df662436bff262ee828006706e64f115db1727df5"
     }
   ]
 }

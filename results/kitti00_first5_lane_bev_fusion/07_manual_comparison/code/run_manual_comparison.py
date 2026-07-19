@@ -29,6 +29,7 @@ POSE_PATH = PACKAGE_ROOT / "metadata" / "poses_00_first5.txt"
 CLRNET_JSON = MANUAL_ROOT / "data" / "clrnet_lanes_kitti_ordered.json"
 OUTPUT_DIR = MANUAL_ROOT / "results"
 AUDIT_DIR = MANUAL_ROOT / "audit"
+COMPLETE_OVERVIEW_PATH = PACKAGE_ROOT / "06_overview" / "complete_pipeline_with_manual_comparison.png"
 
 sys.path.insert(0, str(REPO_ROOT))
 sys.path.insert(0, str(HERE))
@@ -65,6 +66,23 @@ def imwrite(path: Path, image: np.ndarray) -> None:
     if not success:
         raise ValueError(f"Cannot encode {path}")
     encoded.tofile(path)
+
+
+def stack_native_width(images: list[np.ndarray], gap: int = 56) -> np.ndarray:
+    """Stack finished figures without rescaling, preserving their native detail."""
+    width = max(image.shape[1] for image in images)
+    height = sum(image.shape[0] for image in images) + gap * (len(images) - 1)
+    canvas = np.full((height, width, 3), 255, dtype=np.uint8)
+    cursor = 0
+    for index, image in enumerate(images):
+        x_offset = (width - image.shape[1]) // 2
+        canvas[cursor : cursor + image.shape[0], x_offset : x_offset + image.shape[1]] = image
+        cursor += image.shape[0]
+        if index < len(images) - 1:
+            divider_y = cursor + gap // 2
+            cv2.line(canvas, (40, divider_y), (width - 40, divider_y), (40, 40, 40), 2, cv2.LINE_AA)
+            cursor += gap
+    return canvas
 
 
 def resample_polyline(points: np.ndarray, count: int = 64) -> np.ndarray:
@@ -444,6 +462,14 @@ def main() -> None:
     figure.savefig(comparison_path, bbox_inches="tight", facecolor="white")
     plt.close(figure)
 
+    complete_overview = stack_native_width(
+        [
+            imread(PACKAGE_ROOT / "06_overview" / "all_stages_comparison.png"),
+            imread(comparison_path),
+        ]
+    )
+    imwrite(COMPLETE_OVERVIEW_PATH, complete_overview)
+
     audit = {
         "scope": "Manual-vs-CLRNet comparison appended to the result branch; not merged to main.",
         "manual_annotation": manual_record,
@@ -488,6 +514,10 @@ def main() -> None:
             for frame_id in range(5)
         },
         "manual_annotations_sha256": sha256(MANUAL_ROOT / "data" / "manual_annotations.json"),
+        "complete_overview": {
+            "path": str(COMPLETE_OVERVIEW_PATH.relative_to(PACKAGE_ROOT)).replace("\\", "/"),
+            "sha256": sha256(COMPLETE_OVERVIEW_PATH),
+        },
         "output_sha256": {path.name: sha256(path) for path in sorted(OUTPUT_DIR.glob("*.png"))},
     }
     (AUDIT_DIR / "manual_vs_clrnet_audit.json").write_text(json.dumps(audit, ensure_ascii=False, indent=2), encoding="utf-8")
