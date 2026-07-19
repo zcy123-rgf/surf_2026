@@ -1,0 +1,303 @@
+{
+  "dataset": {
+    "name": "KITTI Odometry Sequence 00",
+    "frames": [
+      0,
+      1,
+      2,
+      3,
+      4
+    ],
+    "reference_frame": 4,
+    "calibration_sha256": "7cfc9ab047da6bd829d669e31b2a0d72c278d084fa0c02f2f0320795d51a5d01",
+    "poses_sha256": "90791a4113df979b149fa9e1104e960ea59f525a8318a202dbb6aec1a3d88793"
+  },
+  "detector": {
+    "name": "CLRNet",
+    "config": "configs/clrnet/clr_resnet18_culane.py",
+    "checkpoint": "weights/culane_r18.pth",
+    "checkpoint_sha256": "042f0a1e8d5f1cdfcf97b21b93c6f40d3d67cdeb682a5fcf80e49e65af887322",
+    "frame_selection": [
+      {
+        "frame_id": 0,
+        "clrnet_lane_count": 2,
+        "selection_rule": "two outermost CLRNet polylines by robust bottom-x",
+        "selected": [
+          {
+            "side": "left",
+            "lane_index": 0,
+            "bottom_x_px": 162.19566345214844,
+            "image_points": 64,
+            "projected_points": 59,
+            "aligned_in_range_points": 57
+          },
+          {
+            "side": "right",
+            "lane_index": 1,
+            "bottom_x_px": 858.7825622558594,
+            "image_points": 64,
+            "projected_points": 59,
+            "aligned_in_range_points": 56
+          }
+        ],
+        "rejected_extra_lane_indices": []
+      },
+      {
+        "frame_id": 1,
+        "clrnet_lane_count": 3,
+        "selection_rule": "two outermost CLRNet polylines by robust bottom-x",
+        "selected": [
+          {
+            "side": "left",
+            "lane_index": 0,
+            "bottom_x_px": 163.51815795898438,
+            "image_points": 63,
+            "projected_points": 59,
+            "aligned_in_range_points": 59
+          },
+          {
+            "side": "right",
+            "lane_index": 1,
+            "bottom_x_px": 851.2331848144531,
+            "image_points": 63,
+            "projected_points": 59,
+            "aligned_in_range_points": 59
+          }
+        ],
+        "rejected_extra_lane_indices": [
+          2
+        ]
+      },
+      {
+        "frame_id": 2,
+        "clrnet_lane_count": 2,
+        "selection_rule": "two outermost CLRNet polylines by robust bottom-x",
+        "selected": [
+          {
+            "side": "left",
+            "lane_index": 0,
+            "bottom_x_px": 163.24710083007812,
+            "image_points": 62,
+            "projected_points": 59,
+            "aligned_in_range_points": 59
+          },
+          {
+            "side": "right",
+            "lane_index": 1,
+            "bottom_x_px": 844.7079772949219,
+            "image_points": 63,
+            "projected_points": 59,
+            "aligned_in_range_points": 59
+          }
+        ],
+        "rejected_extra_lane_indices": []
+      },
+      {
+        "frame_id": 3,
+        "clrnet_lane_count": 2,
+        "selection_rule": "two outermost CLRNet polylines by robust bottom-x",
+        "selected": [
+          {
+            "side": "left",
+            "lane_index": 0,
+            "bottom_x_px": 162.04515838623047,
+            "image_points": 63,
+            "projected_points": 59,
+            "aligned_in_range_points": 59
+          },
+          {
+            "side": "right",
+            "lane_index": 1,
+            "bottom_x_px": 842.4402770996094,
+            "image_points": 63,
+            "projected_points": 59,
+            "aligned_in_range_points": 59
+          }
+        ],
+        "rejected_extra_lane_indices": []
+      },
+      {
+        "frame_id": 4,
+        "clrnet_lane_count": 2,
+        "selection_rule": "two outermost CLRNet polylines by robust bottom-x",
+        "selected": [
+          {
+            "side": "left",
+            "lane_index": 0,
+            "bottom_x_px": 160.42953491210938,
+            "image_points": 62,
+            "projected_points": 59,
+            "aligned_in_range_points": 59
+          },
+          {
+            "side": "right",
+            "lane_index": 1,
+            "bottom_x_px": 840.3557434082031,
+            "image_points": 62,
+            "projected_points": 59,
+            "aligned_in_range_points": 59
+          }
+        ],
+        "rejected_extra_lane_indices": []
+      }
+    ]
+  },
+  "projection": {
+    "operation": "cv2.warpPerspective on the selected two-lane-only image mask",
+    "camera_intrinsic_K": [
+      [
+        718.856,
+        0.0,
+        607.1928
+      ],
+      [
+        0.0,
+        718.856,
+        185.2157
+      ],
+      [
+        0.0,
+        0.0,
+        1.0
+      ]
+    ],
+    "fixed_H_image_to_bev_pixels": [
+      [
+        -0.35589582445893586,
+        -2.1569444641631508,
+        615.597350965269
+      ],
+      [
+        3.0282378024867447e-16,
+        -4.589243438799354,
+        958.86708175677
+      ],
+      [
+        4.985846708882316e-19,
+        -0.005399110211515069,
+        1.0
+      ]
+    ],
+    "bev_size_hw_px": [
+      800,
+      800
+    ],
+    "x_range_m": [
+      -10.0,
+      10.0
+    ],
+    "z_range_m": [
+      3.0,
+      50.0
+    ],
+    "camera_height_m": 1.65,
+    "pitch_deg": 0.0,
+    "warning": "Height and pitch are repository defaults/assumptions, not Odometry road-plane ground truth."
+  },
+  "pose_alignment": {
+    "formula": "p_ref = inv(T_w_ref) @ T_w_i @ p_i",
+    "reference_frame": 4
+  },
+  "fusion": {
+    "weights": [
+      0.2,
+      0.4,
+      0.6000000000000001,
+      0.8,
+      1.0
+    ],
+    "without_denoise": {
+      "points": 585,
+      "union_pixels": 28570,
+      "overlap_pixels": 12300,
+      "overlap_fraction": 0.43052152607630384,
+      "thresholded_pixels": 20705
+    },
+    "ransac": {
+      "iterations": 100,
+      "threshold_m": 0.3,
+      "seed": 20260717,
+      "points": 488,
+      "point_retention_fraction": 0.8341880341880342,
+      "bev_thresholded_coverage_retention": 0.3484182564597923,
+      "per_lane": [
+        {
+          "frame_id": 0,
+          "side": "left",
+          "lane_index": 0,
+          "raw_points": 57,
+          "kept_points": 41
+        },
+        {
+          "frame_id": 0,
+          "side": "right",
+          "lane_index": 1,
+          "raw_points": 56,
+          "kept_points": 54
+        },
+        {
+          "frame_id": 1,
+          "side": "left",
+          "lane_index": 0,
+          "raw_points": 59,
+          "kept_points": 43
+        },
+        {
+          "frame_id": 1,
+          "side": "right",
+          "lane_index": 1,
+          "raw_points": 59,
+          "kept_points": 56
+        },
+        {
+          "frame_id": 2,
+          "side": "left",
+          "lane_index": 0,
+          "raw_points": 59,
+          "kept_points": 43
+        },
+        {
+          "frame_id": 2,
+          "side": "right",
+          "lane_index": 1,
+          "raw_points": 59,
+          "kept_points": 56
+        },
+        {
+          "frame_id": 3,
+          "side": "left",
+          "lane_index": 0,
+          "raw_points": 59,
+          "kept_points": 43
+        },
+        {
+          "frame_id": 3,
+          "side": "right",
+          "lane_index": 1,
+          "raw_points": 59,
+          "kept_points": 55
+        },
+        {
+          "frame_id": 4,
+          "side": "left",
+          "lane_index": 0,
+          "raw_points": 59,
+          "kept_points": 42
+        },
+        {
+          "frame_id": 4,
+          "side": "right",
+          "lane_index": 1,
+          "raw_points": 59,
+          "kept_points": 55
+        }
+      ],
+      "after_denoise": {
+        "union_pixels": 10076,
+        "overlap_pixels": 7158,
+        "overlap_fraction": 0.7104009527590314,
+        "thresholded_pixels": 7214
+      }
+    }
+  }
+}

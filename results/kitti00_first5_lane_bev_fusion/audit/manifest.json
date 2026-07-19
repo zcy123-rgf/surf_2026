@@ -1,0 +1,389 @@
+{
+  "dataset": {
+    "name": "KITTI Odometry Sequence 00",
+    "frames": [
+      0,
+      1,
+      2,
+      3,
+      4
+    ],
+    "reference_frame": 4,
+    "calibration_sha256": "7cfc9ab047da6bd829d669e31b2a0d72c278d084fa0c02f2f0320795d51a5d01",
+    "poses_sha256": "90791a4113df979b149fa9e1104e960ea59f525a8318a202dbb6aec1a3d88793"
+  },
+  "official_image_provenance": {
+    "conclusion": "All five images are byte-identical to KITTI Odometry sequence 00 frames 0-4, but supplied filenames were permuted.",
+    "official_raw_archive": "https://s3.eu-central-1.amazonaws.com/avg-kitti/raw_data/2011_10_03_drive_0027/2011_10_03_drive_0027_sync.zip",
+    "official_raw_subdirectory": "2011_10_03/2011_10_03_drive_0027_sync/image_02/data",
+    "supplied_order_as_kitti_frames": [
+      0,
+      4,
+      2,
+      1,
+      3
+    ],
+    "chronological_order_as_supplied_files": [
+      0,
+      3,
+      2,
+      4,
+      1
+    ],
+    "pose_file_byte_equal_to_local_official_kitti_odometry_poses_00": true,
+    "calib_file_matches_first_four_projection_rows_of_kitti_sequence_00": true,
+    "mapping": [
+      {
+        "supplied_file": "0.png",
+        "verified_kitti_sequence": "00",
+        "verified_kitti_frame": 0,
+        "ordered_file": "0.png",
+        "sha256": "af34528f0edd14ddf8ee7ac9017f4b7f540e04e3d50cecce006245d950ea1d6c",
+        "byte_equal_to_official_raw_png": true
+      },
+      {
+        "supplied_file": "3.png",
+        "verified_kitti_sequence": "00",
+        "verified_kitti_frame": 1,
+        "ordered_file": "1.png",
+        "sha256": "cc8a7a3c3fa653b5edec3ac81dd7bda4e5391330c82070d8bc6c3e2831572263",
+        "byte_equal_to_official_raw_png": true
+      },
+      {
+        "supplied_file": "2.png",
+        "verified_kitti_sequence": "00",
+        "verified_kitti_frame": 2,
+        "ordered_file": "2.png",
+        "sha256": "18504a8bf4e71a2273cc31289f0c3fdd1a46942fdd59125a14bb14da58457522",
+        "byte_equal_to_official_raw_png": true
+      },
+      {
+        "supplied_file": "4.png",
+        "verified_kitti_sequence": "00",
+        "verified_kitti_frame": 3,
+        "ordered_file": "3.png",
+        "sha256": "0766814389f2650b556913b07f3b1e2344ad9f1e6e9defef7ccceddd22e2562a",
+        "byte_equal_to_official_raw_png": true
+      },
+      {
+        "supplied_file": "1.png",
+        "verified_kitti_sequence": "00",
+        "verified_kitti_frame": 4,
+        "ordered_file": "4.png",
+        "sha256": "b0d2c7364bdfb75b099d48303ff5e296b1004aa2b5969d81383b8c36c62b2c49",
+        "byte_equal_to_official_raw_png": true
+      }
+    ]
+  },
+  "detector": {
+    "name": "CLRNet",
+    "config": "configs/clrnet/clr_resnet18_culane.py",
+    "checkpoint": "weights/culane_r18.pth",
+    "checkpoint_sha256": "042f0a1e8d5f1cdfcf97b21b93c6f40d3d67cdeb682a5fcf80e49e65af887322"
+  },
+  "projection": {
+    "operation": "cv2.warpPerspective on the selected two-lane-only image mask",
+    "camera_intrinsic_K": [
+      [
+        718.856,
+        0.0,
+        607.1928
+      ],
+      [
+        0.0,
+        718.856,
+        185.2157
+      ],
+      [
+        0.0,
+        0.0,
+        1.0
+      ]
+    ],
+    "fixed_H_image_to_bev_pixels": [
+      [
+        -0.35589582445893586,
+        -2.1569444641631508,
+        615.597350965269
+      ],
+      [
+        3.0282378024867447e-16,
+        -4.589243438799354,
+        958.86708175677
+      ],
+      [
+        4.985846708882316e-19,
+        -0.005399110211515069,
+        1.0
+      ]
+    ],
+    "bev_size_hw_px": [
+      800,
+      800
+    ],
+    "x_range_m": [
+      -10.0,
+      10.0
+    ],
+    "z_range_m": [
+      3.0,
+      50.0
+    ],
+    "camera_height_m": 1.65,
+    "pitch_deg": 0.0,
+    "warning": "Height and pitch are repository defaults/assumptions, not Odometry road-plane ground truth."
+  },
+  "pose_alignment": {
+    "formula": "p_ref = inv(T_w_ref) @ T_w_i @ p_i",
+    "reference_frame": 4
+  },
+  "fusion": {
+    "weights": [
+      0.2,
+      0.4,
+      0.6000000000000001,
+      0.8,
+      1.0
+    ],
+    "without_denoise": {
+      "points": 585,
+      "union_pixels": 28570,
+      "overlap_pixels": 12300,
+      "overlap_fraction": 0.43052152607630384,
+      "thresholded_pixels": 20705
+    },
+    "ransac": {
+      "iterations": 100,
+      "threshold_m": 0.3,
+      "seed": 20260717,
+      "points": 488,
+      "point_retention_fraction": 0.8341880341880342,
+      "bev_thresholded_coverage_retention": 0.3484182564597923,
+      "per_lane": [
+        {
+          "frame_id": 0,
+          "side": "left",
+          "lane_index": 0,
+          "raw_points": 57,
+          "kept_points": 41
+        },
+        {
+          "frame_id": 0,
+          "side": "right",
+          "lane_index": 1,
+          "raw_points": 56,
+          "kept_points": 54
+        },
+        {
+          "frame_id": 1,
+          "side": "left",
+          "lane_index": 0,
+          "raw_points": 59,
+          "kept_points": 43
+        },
+        {
+          "frame_id": 1,
+          "side": "right",
+          "lane_index": 1,
+          "raw_points": 59,
+          "kept_points": 56
+        },
+        {
+          "frame_id": 2,
+          "side": "left",
+          "lane_index": 0,
+          "raw_points": 59,
+          "kept_points": 43
+        },
+        {
+          "frame_id": 2,
+          "side": "right",
+          "lane_index": 1,
+          "raw_points": 59,
+          "kept_points": 56
+        },
+        {
+          "frame_id": 3,
+          "side": "left",
+          "lane_index": 0,
+          "raw_points": 59,
+          "kept_points": 43
+        },
+        {
+          "frame_id": 3,
+          "side": "right",
+          "lane_index": 1,
+          "raw_points": 59,
+          "kept_points": 55
+        },
+        {
+          "frame_id": 4,
+          "side": "left",
+          "lane_index": 0,
+          "raw_points": 59,
+          "kept_points": 42
+        },
+        {
+          "frame_id": 4,
+          "side": "right",
+          "lane_index": 1,
+          "raw_points": 59,
+          "kept_points": 55
+        }
+      ],
+      "after_denoise": {
+        "union_pixels": 10076,
+        "overlap_pixels": 7158,
+        "overlap_fraction": 0.7104009527590314,
+        "thresholded_pixels": 7214
+      }
+    }
+  },
+  "files": [
+    {
+      "path": "01_original_frames/frame_000000.png",
+      "bytes": 851565,
+      "sha256": "af34528f0edd14ddf8ee7ac9017f4b7f540e04e3d50cecce006245d950ea1d6c"
+    },
+    {
+      "path": "01_original_frames/frame_000001.png",
+      "bytes": 838481,
+      "sha256": "cc8a7a3c3fa653b5edec3ac81dd7bda4e5391330c82070d8bc6c3e2831572263"
+    },
+    {
+      "path": "01_original_frames/frame_000002.png",
+      "bytes": 840684,
+      "sha256": "18504a8bf4e71a2273cc31289f0c3fdd1a46942fdd59125a14bb14da58457522"
+    },
+    {
+      "path": "01_original_frames/frame_000003.png",
+      "bytes": 844349,
+      "sha256": "0766814389f2650b556913b07f3b1e2344ad9f1e6e9defef7ccceddd22e2562a"
+    },
+    {
+      "path": "01_original_frames/frame_000004.png",
+      "bytes": 850438,
+      "sha256": "b0d2c7364bdfb75b099d48303ff5e296b1004aa2b5969d81383b8c36c62b2c49"
+    },
+    {
+      "path": "02_lane_detection/frame_000000_clrnet_two_lanes.png",
+      "bytes": 830595,
+      "sha256": "b2b5757c77d069ec3e6d4bef8eed11c80c7b1e2d70ab3b980fd0a6ebc646dff6"
+    },
+    {
+      "path": "02_lane_detection/frame_000001_clrnet_two_lanes.png",
+      "bytes": 819686,
+      "sha256": "ebc117f9e5c1df30bb6a9687497a445c7b4da6e32a964604ce0bc88150120669"
+    },
+    {
+      "path": "02_lane_detection/frame_000002_clrnet_two_lanes.png",
+      "bytes": 818598,
+      "sha256": "37f6dde635304f24287f79517c172025174c7ae87da4295f50de5b6f0a762a60"
+    },
+    {
+      "path": "02_lane_detection/frame_000003_clrnet_two_lanes.png",
+      "bytes": 819705,
+      "sha256": "b21ac8f37ac60ddde951714c59803e0311854eb9324a770bcd0bdde452df8147"
+    },
+    {
+      "path": "02_lane_detection/frame_000004_clrnet_two_lanes.png",
+      "bytes": 824158,
+      "sha256": "9dc9aa44632d7044e5cd72054bbb1cf3820fc0c185092e3e3676fcf69b4d0c83"
+    },
+    {
+      "path": "03_bev_projection/frame_000000_bev.png",
+      "bytes": 72461,
+      "sha256": "eb14b82440f75d726372329abc9c751b720a82b3843c6779d8b8e8620b29a3f3"
+    },
+    {
+      "path": "03_bev_projection/frame_000001_bev.png",
+      "bytes": 72345,
+      "sha256": "801b562f2f87e1dbadd30eaf2714c2341279fb4e1890e8678a9f48ed4b6f70a6"
+    },
+    {
+      "path": "03_bev_projection/frame_000002_bev.png",
+      "bytes": 73833,
+      "sha256": "8019daacf13d7b3573c1cc29ee813073694e3c540dd67b17c46dac366cb5d251"
+    },
+    {
+      "path": "03_bev_projection/frame_000003_bev.png",
+      "bytes": 73654,
+      "sha256": "0b9175cb3d8c0db9b3cc19180f72ed359abcff9afa0f84bfc51137afc284f472"
+    },
+    {
+      "path": "03_bev_projection/frame_000004_bev.png",
+      "bytes": 74610,
+      "sha256": "c7022bfbd4c04811945a21f43bbca60864873fc44371b19fa2366dfb3e5188fb"
+    },
+    {
+      "path": "04_pose_aligned_bev/frame_000000_aligned_to_000004.png",
+      "bytes": 33056,
+      "sha256": "e782c89bbc82a6aa81b303fe9629d3806bae4e30ee161ac00f44bc8b19f4fddb"
+    },
+    {
+      "path": "04_pose_aligned_bev/frame_000001_aligned_to_000004.png",
+      "bytes": 33112,
+      "sha256": "c694d07ca4f2c3e55948bdc46a5ab7030adfbd81ef744a219d81d68a2b50461e"
+    },
+    {
+      "path": "04_pose_aligned_bev/frame_000002_aligned_to_000004.png",
+      "bytes": 33045,
+      "sha256": "f3922276bedc9f89a9e359a155c97c5cef929295774a789a18ea2e290fa35715"
+    },
+    {
+      "path": "04_pose_aligned_bev/frame_000003_aligned_to_000004.png",
+      "bytes": 33072,
+      "sha256": "f6495537c522b311019fac6782b7e749878e77b38a4f00a7e9db2efc7d100626"
+    },
+    {
+      "path": "04_pose_aligned_bev/frame_000004_aligned_to_000004.png",
+      "bytes": 32791,
+      "sha256": "8fbf93a3d8a3b1083f9acab496b718487136eb52888ae2f1065ffd4f2f68b7a4"
+    },
+    {
+      "path": "05_fusion/fusion_before_after_comparison.png",
+      "bytes": 189275,
+      "sha256": "88c2e61969f45da73a638b7a03dac59aa3951e2cab9d42fe83c3f7b8bf1143f1"
+    },
+    {
+      "path": "05_fusion/fusion_with_ransac.png",
+      "bytes": 45654,
+      "sha256": "9089c7db24e07e74a5e9e8c10fb8b0ecc732d9c2d3837e0db0f5c126f896f067"
+    },
+    {
+      "path": "05_fusion/fusion_without_denoise.png",
+      "bytes": 94479,
+      "sha256": "47b86b5becbdd26cacae8e866cdcbf61e4a9dfc83d29919ca10ae17228784d0f"
+    },
+    {
+      "path": "06_overview/all_stages_comparison.png",
+      "bytes": 2130360,
+      "sha256": "a0ebfbacfe7206c3fbad12fd0bedd2b72bec16a9989aa02e0401e5c900367c81"
+    },
+    {
+      "path": "audit/kitti_first5_provenance.json",
+      "bytes": 2140,
+      "sha256": "1870497b68768b4aa626b8ccce875b9aa5b17f2af05fad6e7c2de7b8c66cc97c"
+    },
+    {
+      "path": "audit/two_lane_bev_audit.json",
+      "bytes": 7817,
+      "sha256": "51d4dfa1d1a857024cf6aa75c7f64732aaec4db4e9cfd4767047d8561d1891a2"
+    },
+    {
+      "path": "metadata/calib.txt",
+      "bytes": 931,
+      "sha256": "7cfc9ab047da6bd829d669e31b2a0d72c278d084fa0c02f2f0320795d51a5d01"
+    },
+    {
+      "path": "metadata/poses_00_first5.txt",
+      "bytes": 806,
+      "sha256": "47052b55834f2192a0899bb8524b0f704702529905d60c7ab5e5e4ef2facba00"
+    },
+    {
+      "path": "README.md",
+      "bytes": 2531,
+      "sha256": "8a6d364c197479a12c06d55a68e2cf7716df9a9eab3c17f41600b381fcfea98d"
+    }
+  ]
+}
