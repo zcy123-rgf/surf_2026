@@ -1,0 +1,12 @@
+# Windows workstation runtime dependencies (PyTorch is installed separately).
+# NumPy 1.x avoids compatibility problems with the older CLRNet codebase.
+numpy==1.26.4
+opencv-python==4.10.0.84
+addict==2.4.0
+PyYAML==6.0.2
+yapf==0.40.2
+six==1.16.0
+tqdm==4.67.1
+scipy==1.13.1
+matplotlib==3.9.2
+pytest==8.3.3
