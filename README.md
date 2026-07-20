@@ -61,6 +61,18 @@ bash scripts/setup_clrnet_mac.sh
 
 This script creates `CLRNet/.venv-clrnet-demo`, downloads the official CULane ResNet-18 weight, and applies the small local compatibility patch needed for Mac/no-CUDA inference.
 
+If the GitHub Release weight download is slow or fails, get `culane_r18.pth` from a teammate or shared drive, then run:
+
+```bash
+CLRNET_WEIGHT_FILE=/path/to/culane_r18.pth bash scripts/setup_clrnet_mac.sh
+```
+
+If your team hosts the zip file somewhere else, override the download URL:
+
+```bash
+WEIGHT_URL=https://your-mirror/culane_r18.pth.zip bash scripts/setup_clrnet_mac.sh
+```
+
 ### General Python setup
 
 For the project-level fallback detector and utilities:
