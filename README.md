@@ -85,6 +85,22 @@ Outputs:
 ```text
 outputs/surf_bev/single_frame_lanes.jpg
 outputs/surf_bev/single_frame_bev.jpg
+outputs/surf_bev/single_frame_lanes.json
+```
+
+The JSON file is the structured output for downstream modules. It stores each lane as both image-space points and ground-plane BEV points:
+
+```json
+{
+  "mode": "single",
+  "lanes": [
+    {
+      "id": 0,
+      "image_points": [[x, y]],
+      "ground_points_xz_m": [[X, Z]]
+    }
+  ]
+}
 ```
 
 If CLRNet is unavailable, run the notebook-style fallback:
@@ -114,6 +130,28 @@ Output:
 
 ```text
 outputs/surf_bev/multi_frame_fused_bev.jpg
+outputs/surf_bev/multi_frame_fusion.json
+```
+
+The multi-frame JSON keeps the intermediate data for every frame:
+
+```json
+{
+  "mode": "multi",
+  "ref_id": 0,
+  "frames": [
+    {
+      "frame_id": 0,
+      "lanes": [
+        {
+          "image_points": [[x, y]],
+          "ground_points_xz_m": [[X, Z]],
+          "aligned_ground_points_xz_m": [[X, Z]]
+        }
+      ]
+    }
+  ]
+}
 ```
 
 ## Data Needed For Real Fusion

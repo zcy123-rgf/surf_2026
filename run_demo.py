@@ -50,6 +50,7 @@ def main():
         print(f"Detected lanes: {len(result['lanes'])}")
         print(f"Image lanes: {result['image_out']}")
         print(f"BEV result: {result['bev_out']}")
+        print(f"Structured output: {result['json_out']}")
         return
 
     if not args.image_dir or not args.calib or not args.poses:
@@ -68,9 +69,9 @@ def main():
         pitch_deg=args.pitch_deg,
     )
     print(f"Fused BEV: {result['fused_out']}")
+    print(f"Structured output: {result['json_out']}")
     print(f"Debug frames: {result['debug_count']}")
 
 
 if __name__ == "__main__":
     main()
-
