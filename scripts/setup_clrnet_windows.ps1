@@ -37,7 +37,12 @@ if (-not $Existing) {
     & conda create -y -n $EnvName python=3.10 pip
     if ($LASTEXITCODE -ne 0) { throw "Conda environment creation failed." }
 } else {
-    $EnvironmentPython = (& conda run -n $EnvName python -c "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}')").Trim()
+    $EnvironmentPythonOutput = ((& conda run -n $EnvName python -c "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}')" 2>&1) -join " ")
+    if ($EnvironmentPythonOutput -match "\b\d+\.\d+\b") {
+        $EnvironmentPython = $Matches[0]
+    } else {
+        throw "Could not determine the Python version in Conda environment '$EnvName'. Output: $EnvironmentPythonOutput"
+    }
     if ($EnvironmentPython -ne "3.10") {
         throw "Conda environment '$EnvName' uses Python $EnvironmentPython. Remove this incomplete environment with 'conda env remove -n $EnvName -y', then rerun this script."
     }
