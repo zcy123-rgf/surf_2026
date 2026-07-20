@@ -60,10 +60,21 @@ Write-Host "[4/7] Installing project dependencies..."
 if ($LASTEXITCODE -ne 0) { throw "Project dependency installation failed." }
 
 Write-Host "[5/7] Applying CLRNet no-compiler compatibility layer..."
-& git -C $ClrnetDir apply --reverse --check $PatchPath 2>$null
-if ($LASTEXITCODE -ne 0) {
-    & git -C $ClrnetDir apply --check $PatchPath
-    if ($LASTEXITCODE -ne 0) { throw "CLRNet compatibility patch cannot be applied cleanly." }
+$SavedErrorActionPreference = $ErrorActionPreference
+$ErrorActionPreference = "Continue"
+$ReverseCheckOutput = & git -C $ClrnetDir apply --reverse --check $PatchPath 2>&1
+$PatchAlreadyApplied = ($LASTEXITCODE -eq 0)
+$ErrorActionPreference = $SavedErrorActionPreference
+
+if (-not $PatchAlreadyApplied) {
+    $ErrorActionPreference = "Continue"
+    $ForwardCheckOutput = & git -C $ClrnetDir apply --check $PatchPath 2>&1
+    $ForwardCheckPassed = ($LASTEXITCODE -eq 0)
+    $ErrorActionPreference = $SavedErrorActionPreference
+    if (-not $ForwardCheckPassed) {
+        throw "CLRNet compatibility patch cannot be applied cleanly.`n$($ForwardCheckOutput -join [Environment]::NewLine)"
+    }
+
     & git -C $ClrnetDir apply $PatchPath
     if ($LASTEXITCODE -ne 0) { throw "CLRNet compatibility patch failed." }
 }
