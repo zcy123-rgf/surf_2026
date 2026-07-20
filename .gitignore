@@ -2,6 +2,7 @@
 .idea/
 .venv/
 **/.venv/
+.runtime/
 __pycache__/
 *.pyc
 .ipynb_checkpoints/

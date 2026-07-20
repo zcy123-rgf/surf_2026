@@ -4,12 +4,20 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import platform
 import sys
+import tempfile
 from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parents[1]
+RUNTIME_TEMP = ROOT / ".runtime" / "tmp"
+RUNTIME_TEMP.mkdir(parents=True, exist_ok=True)
+os.environ["TEMP"] = str(RUNTIME_TEMP)
+os.environ["TMP"] = str(RUNTIME_TEMP)
+os.environ["TMPDIR"] = str(RUNTIME_TEMP)
+tempfile.tempdir = str(RUNTIME_TEMP)
 
 
 def main() -> None:
@@ -32,6 +40,7 @@ def main() -> None:
         "cuda_runtime_bundled_with_torch": torch.version.cuda,
         "cuda_available": torch.cuda.is_available(),
         "gpu": torch.cuda.get_device_name(0) if torch.cuda.is_available() else None,
+        "runtime_temp": tempfile.gettempdir(),
         "clrnet_submodule": (ROOT / "CLRNet" / "clrnet").is_dir(),
         "clrnet_checkpoint": (ROOT / "CLRNet" / "weights" / "culane_r18.pth").is_file(),
     }

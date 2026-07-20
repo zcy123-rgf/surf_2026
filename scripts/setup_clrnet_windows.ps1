@@ -16,8 +16,13 @@ $WeightDir = Join-Path $ClrnetDir "weights"
 $WeightZip = Join-Path $WeightDir "culane_r18.pth.zip"
 $WeightPath = Join-Path $WeightDir "culane_r18.pth"
 $WeightUrl = "https://github.com/Turoad/CLRNet/releases/download/models/culane_r18.pth.zip"
+$RuntimeTemp = Join-Path $RootDir ".runtime\tmp"
 
 Set-Location $RootDir
+New-Item -ItemType Directory -Force -Path $RuntimeTemp | Out-Null
+$env:TEMP = $RuntimeTemp
+$env:TMP = $RuntimeTemp
+$env:TMPDIR = $RuntimeTemp
 
 if (-not (Get-Command git -ErrorAction SilentlyContinue)) {
     throw "Git was not found in PATH."
