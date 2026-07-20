@@ -74,7 +74,8 @@ Set-ExecutionPolicy -Scope Process Bypass
 .\scripts\setup_clrnet_windows.ps1
 ```
 
-The script creates the `surf2026-win` Conda environment, installs PyTorch
+The script creates an isolated Python 3.10 `surf2026-win` Conda environment (the
+workstation's base Python 3.9 installation is left unchanged), installs PyTorch
 `2.5.1` with its CUDA 12.1 runtime, initializes CLRNet, downloads the official
 CULane ResNet-18 checkpoint, applies the no-compiler NMS/MMCV compatibility
 layer, and runs one real CLRNet inference smoke test. The CUDA runtime bundled

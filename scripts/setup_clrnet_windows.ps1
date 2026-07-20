@@ -30,17 +30,20 @@ Write-Host "[1/7] Initializing CLRNet submodule..."
 & git submodule update --init --recursive
 if ($LASTEXITCODE -ne 0) { throw "CLRNet submodule initialization failed." }
 
-Write-Host "[2/7] Preparing isolated Python 3.9 environment: $EnvName"
+Write-Host "[2/7] Preparing isolated Python 3.10 environment: $EnvName"
 $CondaInfo = (& conda env list --json | ConvertFrom-Json)
 $Existing = $CondaInfo.envs | Where-Object { (Split-Path $_ -Leaf) -eq $EnvName }
 if (-not $Existing) {
-    & conda create -y -n $EnvName python=3.9 pip
+    & conda create -y -n $EnvName python=3.10 pip
     if ($LASTEXITCODE -ne 0) { throw "Conda environment creation failed." }
+} else {
+    $EnvironmentPython = (& conda run -n $EnvName python -c "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}')").Trim()
+    if ($EnvironmentPython -ne "3.10") {
+        throw "Conda environment '$EnvName' uses Python $EnvironmentPython. Remove this incomplete environment with 'conda env remove -n $EnvName -y', then rerun this script."
+    }
 }
 
 Write-Host "[3/7] Installing PyTorch..."
-& conda run -n $EnvName python -m pip install --upgrade pip
-if ($LASTEXITCODE -ne 0) { throw "pip upgrade failed." }
 if ($Backend -eq "cuda") {
     & conda run -n $EnvName python -m pip install `
         torch==2.5.1 torchvision==0.20.1 `
