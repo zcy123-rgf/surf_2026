@@ -24,7 +24,11 @@ from pathlib import Path
 from typing import Iterable
 
 import cv2
+import matplotlib
 import numpy as np
+
+matplotlib.use("Agg")
+import matplotlib.pyplot as plt  # noqa: E402
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -45,6 +49,7 @@ FRAME_COLORS_BGR = [
     (214, 39, 40),
     (148, 103, 189),
 ]
+FRAME_COLORS_RGB = ["#1f77b4", "#ff7f0e", "#2ca02c", "#d62728", "#9467bd"]
 LANE_COLORS_BGR = [(255, 210, 0), (0, 255, 255)]
 ALL_CANDIDATE_COLORS_BGR = [
     (255, 80, 80),
@@ -69,8 +74,10 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--reference-id", type=int, default=4)
     parser.add_argument("--camera-height", type=float, default=1.65)
     parser.add_argument("--pitch-deg", type=float, default=0.0)
-    parser.add_argument("--x-range", default="-10,10")
-    parser.add_argument("--z-range", default="3,50")
+    parser.add_argument("--local-x-range", default="-10,10")
+    parser.add_argument("--local-z-range", default="3,50")
+    parser.add_argument("--fusion-x-range", default="-15,15")
+    parser.add_argument("--fusion-z-range", default="-10,50")
     parser.add_argument("--bev-size", type=int, default=800)
     parser.add_argument("--weights", default="0.2,0.4,0.6,0.8,1.0")
     parser.add_argument("--legacy-ransac-iterations", type=int, default=100)
@@ -84,6 +91,12 @@ def parse_args() -> argparse.Namespace:
         "--clrnet-checkpoint", default="weights/culane_r18.pth"
     )
     parser.add_argument("--device", choices=("cuda", "cpu"), default="cuda")
+    parser.add_argument(
+        "--provenance",
+        type=Path,
+        default=None,
+        help="Optional JSON with expected SHA-256 values for the official frames.",
+    )
     return parser.parse_args()
 
 
@@ -129,7 +142,14 @@ def require_empty_output(path: Path) -> None:
     path.mkdir(parents=True, exist_ok=True)
 
 
-def parse_kitti_projection(calib_path: Path) -> tuple[np.ndarray, str]:
+def parse_range(value: str, option: str) -> tuple[float, float]:
+    values = comma_floats(value)
+    if len(values) != 2 or values[0] >= values[1]:
+        raise ValueError(f"{option} requires two increasing comma-separated values.")
+    return values[0], values[1]
+
+
+def parse_kitti_projection(calib_path: Path) -> dict[str, object]:
     values: dict[str, np.ndarray] = {}
     for line in calib_path.read_text(encoding="utf-8").splitlines():
         if ":" not in line:
@@ -145,7 +165,88 @@ def parse_kitti_projection(calib_path: Path) -> tuple[np.ndarray, str]:
     else:
         raise KeyError("Calibration must contain P2 or P0.")
     projection = values[key].reshape(3, 4)
-    return projection[:, :3], key
+    intrinsic_k = projection[:, :3]
+
+    # KITTI odometry poses are poses of rectified camera 0. P2 projects camera-0
+    # coordinates into the left colour image, so its fourth column must not be
+    # silently discarded when image_2 is paired with poses/00.txt.
+    translation_cam_image_from_cam0 = np.linalg.solve(
+        intrinsic_k, projection[:, 3]
+    )
+    T_cam_image_cam0 = np.eye(4, dtype=np.float64)
+    T_cam_image_cam0[:3, 3] = translation_cam_image_from_cam0
+    T_cam0_cam_image = np.linalg.inv(T_cam_image_cam0)
+    return {
+        "key": key,
+        "projection": projection,
+        "K": intrinsic_k,
+        "T_cam_image_cam0": T_cam_image_cam0,
+        "T_cam0_cam_image": T_cam0_cam_image,
+    }
+
+
+def poses_for_image_camera(
+    poses_cam0: list[np.ndarray], T_cam0_cam_image: np.ndarray
+) -> list[np.ndarray]:
+    """Convert KITTI camera-0 world poses to the camera used by P0/P2."""
+
+    return [pose @ T_cam0_cam_image for pose in poses_cam0]
+
+
+def filter_metric_points(
+    points: np.ndarray,
+    x_range: tuple[float, float],
+    z_range: tuple[float, float],
+) -> np.ndarray:
+    points = np.asarray(points, dtype=np.float64).reshape(-1, 2)
+    if len(points) == 0:
+        return points
+    valid = (
+        np.isfinite(points).all(axis=1)
+        & (points[:, 0] >= x_range[0])
+        & (points[:, 0] <= x_range[1])
+        & (points[:, 1] >= z_range[0])
+        & (points[:, 1] <= z_range[1])
+    )
+    return points[valid]
+
+
+def verify_provenance(
+    provenance_path: Path | None,
+    image_paths: list[Path],
+    frame_ids: list[int],
+) -> dict[str, object] | None:
+    if provenance_path is None:
+        return None
+    if not provenance_path.is_file():
+        raise FileNotFoundError(f"Missing provenance JSON: {provenance_path}")
+    provenance = json.loads(provenance_path.read_text(encoding="utf-8"))
+    expected = {
+        int(item["verified_kitti_frame"]): item["sha256"]
+        for item in provenance.get("mapping", [])
+    }
+    mismatches = []
+    for frame_id, image_path in zip(frame_ids, image_paths):
+        actual = sha256(image_path)
+        if expected.get(frame_id) != actual:
+            mismatches.append(
+                {
+                    "frame_id": frame_id,
+                    "expected_sha256": expected.get(frame_id),
+                    "actual_sha256": actual,
+                }
+            )
+    if mismatches:
+        raise ValueError(
+            "Input images do not match the audited KITTI Sequence 00 frames: "
+            + json.dumps(mismatches, ensure_ascii=False)
+        )
+    return {
+        "path": str(provenance_path.resolve()),
+        "sha256": sha256(provenance_path),
+        "verified_frames": frame_ids,
+        "conclusion": provenance.get("conclusion"),
+    }
 
 
 def checkpoint_path(clrnet_root: Path, checkpoint: str) -> Path:
@@ -200,17 +301,7 @@ def metric_to_pixels(
     x_range: tuple[float, float],
     z_range: tuple[float, float],
 ) -> np.ndarray:
-    points = np.asarray(points, dtype=np.float64).reshape(-1, 2)
-    if len(points) == 0:
-        return np.empty((0, 2), dtype=np.int32)
-    valid = (
-        np.isfinite(points).all(axis=1)
-        & (points[:, 0] >= x_range[0])
-        & (points[:, 0] <= x_range[1])
-        & (points[:, 1] >= z_range[0])
-        & (points[:, 1] <= z_range[1])
-    )
-    points = points[valid]
+    points = filter_metric_points(points, x_range, z_range)
     if len(points) == 0:
         return np.empty((0, 2), dtype=np.int32)
     u = (
@@ -256,6 +347,57 @@ def draw_frame_accumulation(
             for point in metric_to_pixels(lane, bev_size, x_range, z_range):
                 cv2.circle(output, tuple(point), 3, color, -1, cv2.LINE_AA)
     return output
+
+
+def save_pose_metric_plot(
+    path: Path,
+    frames: list[list[np.ndarray]],
+    frame_ids: list[int],
+    camera_origins_xz: list[np.ndarray],
+    reference_id: int,
+    x_range: tuple[float, float],
+    z_range: tuple[float, float],
+) -> None:
+    """Save a frame-coloured metric plot that proves pose alignment was applied."""
+
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fig, axis = plt.subplots(figsize=(8, 12))
+    for frame_index, (frame_id, lanes, origin) in enumerate(
+        zip(frame_ids, frames, camera_origins_xz)
+    ):
+        color = FRAME_COLORS_RGB[frame_index % len(FRAME_COLORS_RGB)]
+        labelled = False
+        for lane in lanes:
+            points = np.asarray(lane, dtype=np.float64).reshape(-1, 2)
+            if not len(points):
+                continue
+            axis.plot(
+                points[:, 0],
+                points[:, 1],
+                "o-",
+                color=color,
+                linewidth=1.5,
+                markersize=3,
+                label=f"frame_{frame_id:06d}" if not labelled else None,
+            )
+            labelled = True
+        axis.scatter(origin[0], origin[1], marker="x", s=90, color=color)
+    axis.set(
+        xlim=x_range,
+        ylim=z_range,
+        xlabel="X right in reference frame [m]",
+        ylabel="Z forward in reference frame [m]",
+        title=(
+            "KITTI Odometry Sequence 00: five-frame pose alignment "
+            f"-> frame_{reference_id:06d}"
+        ),
+    )
+    axis.set_aspect("equal")
+    axis.grid(alpha=0.3)
+    axis.legend()
+    fig.tight_layout()
+    fig.savefig(path, dpi=180)
+    plt.close(fig)
 
 
 def lane_mask(
@@ -318,7 +460,8 @@ def simple_cluster_by_x(points: np.ndarray) -> dict[str, np.ndarray | float]:
             "right": points,
             "left_center": float("nan"),
             "right_center": float("nan"),
-            "window_m": float("nan"),
+            "left_window_m": float("nan"),
+            "right_window_m": float("nan"),
         }
     x_values = points[:, 0]
     left_center = (
@@ -502,14 +645,16 @@ def main() -> None:
     args = parse_args()
     frame_ids = comma_ints(args.frame_ids)
     weights = np.asarray(comma_floats(args.weights), dtype=np.float64)
-    x_values = comma_floats(args.x_range)
-    z_values = comma_floats(args.z_range)
-    if len(x_values) != 2 or len(z_values) != 2:
-        raise ValueError("--x-range and --z-range require two comma-separated values.")
-    x_range = (x_values[0], x_values[1])
-    z_range = (z_values[0], z_values[1])
+    local_x_range = parse_range(args.local_x_range, "--local-x-range")
+    local_z_range = parse_range(args.local_z_range, "--local-z-range")
+    fusion_x_range = parse_range(args.fusion_x_range, "--fusion-x-range")
+    fusion_z_range = parse_range(args.fusion_z_range, "--fusion-z-range")
     if len(frame_ids) != len(weights):
         raise ValueError("The number of frame IDs must equal the number of weights.")
+    if not frame_ids or len(set(frame_ids)) != len(frame_ids):
+        raise ValueError("Frame IDs must be a non-empty list without duplicates.")
+    if not np.isfinite(weights).all() or np.any(weights < 0) or np.sum(weights) <= 0:
+        raise ValueError("Weights must be finite, non-negative, and have a positive sum.")
     if args.reference_id not in frame_ids:
         raise ValueError("Reference ID must be one of the requested frame IDs.")
 
@@ -518,6 +663,8 @@ def main() -> None:
         for frame_id in frame_ids
     ]
     required = [*image_paths, args.calib, args.poses]
+    if args.provenance is not None:
+        required.append(args.provenance)
     missing = [str(path) for path in required if not path.is_file()]
     if missing:
         raise FileNotFoundError("Missing required inputs:\n" + "\n".join(missing))
@@ -542,13 +689,22 @@ def main() -> None:
         if torch.cuda.is_available():
             torch.cuda.manual_seed_all(args.seed)
 
-        intrinsic_k, projection_key = parse_kitti_projection(args.calib)
-        poses = load_kitti_poses(args.poses)
-        if max(frame_ids) >= len(poses):
+        provenance_audit = verify_provenance(
+            args.provenance, image_paths, frame_ids
+        )
+        calibration = parse_kitti_projection(args.calib)
+        intrinsic_k = calibration["K"]
+        poses_cam0 = load_kitti_poses(args.poses)
+        if max(frame_ids) >= len(poses_cam0):
             raise IndexError(
-                f"Pose file contains {len(poses)} rows but frame {max(frame_ids)} was requested."
+                f"Pose file contains {len(poses_cam0)} rows but frame {max(frame_ids)} was requested."
             )
+        poses = poses_for_image_camera(
+            poses_cam0, calibration["T_cam0_cam_image"]
+        )
         reference_pose = poses[args.reference_id]
+        relative_poses = [np.linalg.inv(reference_pose) @ poses[item] for item in frame_ids]
+        camera_origins_xz = [pose[[0, 2], 3] for pose in relative_poses]
         detector = CLRNetLaneDetector(
             clrnet_root=str(args.clrnet_root.resolve()),
             config=args.clrnet_config,
@@ -560,6 +716,7 @@ def main() -> None:
         frame_metrics: list[dict[str, object]] = []
         projected_frames: list[list[np.ndarray]] = []
         aligned_frames: list[list[np.ndarray]] = []
+        fusion_frames: list[list[np.ndarray]] = []
         flat_points: list[list[float]] = []
         point_ranges: list[dict[str, object]] = []
 
@@ -598,6 +755,7 @@ def main() -> None:
 
             projected_lanes: list[np.ndarray] = []
             aligned_lanes: list[np.ndarray] = []
+            fusion_lanes: list[np.ndarray] = []
             selected_records = []
             for side, (lane_index, lane) in zip(("left", "right"), selected):
                 ground = image_to_ground_ipm(
@@ -605,7 +763,7 @@ def main() -> None:
                     intrinsic_k,
                     camera_height=args.camera_height,
                     pitch_deg=args.pitch_deg,
-                    z_range=z_range,
+                    z_range=local_z_range,
                 )
                 aligned = transform_lane_points_by_pose(
                     ground,
@@ -614,16 +772,12 @@ def main() -> None:
                     camera_height=args.camera_height,
                     pitch_deg=args.pitch_deg,
                 )
-                valid = (
-                    np.isfinite(aligned).all(axis=1)
-                    & (aligned[:, 0] >= x_range[0])
-                    & (aligned[:, 0] <= x_range[1])
-                    & (aligned[:, 1] >= z_range[0])
-                    & (aligned[:, 1] <= z_range[1])
+                aligned = aligned[np.isfinite(aligned).all(axis=1)]
+                aligned_for_fusion = filter_metric_points(
+                    aligned, fusion_x_range, fusion_z_range
                 )
-                aligned = aligned[valid]
                 start = len(flat_points)
-                flat_points.extend(aligned.tolist())
+                flat_points.extend(aligned_for_fusion.tolist())
                 point_ranges.append(
                     {
                         "frame_index": frame_index,
@@ -636,6 +790,7 @@ def main() -> None:
                 )
                 projected_lanes.append(ground)
                 aligned_lanes.append(aligned)
+                fusion_lanes.append(aligned_for_fusion)
                 selected_records.append(
                     {
                         "side": side,
@@ -643,20 +798,27 @@ def main() -> None:
                         "bottom_x_px": bottom_x(lane),
                         "image_points": int(len(lane)),
                         "projected_points": int(len(ground)),
-                        "aligned_in_range_points": int(len(aligned)),
+                        "aligned_points": int(len(aligned)),
+                        "aligned_in_fusion_range_points": int(
+                            len(aligned_for_fusion)
+                        ),
+                        "image_xy_px": lane.tolist(),
+                        "local_ground_xz_m": ground.tolist(),
+                        "reference_ground_xz_m": aligned.tolist(),
                     }
                 )
 
             projected_frames.append(projected_lanes)
             aligned_frames.append(aligned_lanes)
+            fusion_frames.append(fusion_lanes)
             imwrite(
                 output_dir / "03_bev_points" / f"frame_{frame_id:06d}.png",
                 draw_metric_points(
                     projected_lanes,
                     LANE_COLORS_BGR,
                     args.bev_size,
-                    x_range,
-                    z_range,
+                    local_x_range,
+                    local_z_range,
                 ),
             )
             imwrite(
@@ -667,8 +829,8 @@ def main() -> None:
                     aligned_lanes,
                     LANE_COLORS_BGR,
                     args.bev_size,
-                    x_range,
-                    z_range,
+                    fusion_x_range,
+                    fusion_z_range,
                 ),
             )
 
@@ -689,22 +851,52 @@ def main() -> None:
                     "candidate_lanes": len(lanes),
                     "selected_image_points": sum(len(lane) for lane in selected_lanes),
                     "projected_points": sum(len(lane) for lane in projected_lanes),
-                    "aligned_in_range_points": sum(len(lane) for lane in aligned_lanes),
+                    "aligned_points": sum(len(lane) for lane in aligned_lanes),
+                    "aligned_in_fusion_range_points": sum(
+                        len(lane) for lane in fusion_lanes
+                    ),
+                    "camera_origin_x_ref_m": float(camera_origins_xz[frame_index][0]),
+                    "camera_origin_z_ref_m": float(camera_origins_xz[frame_index][1]),
                 }
             )
 
+        imwrite(
+            output_dir / "04_pose_aligned_points" / "five_frame_points_by_frame.png",
+            draw_frame_accumulation(
+                aligned_frames,
+                args.bev_size,
+                fusion_x_range,
+                fusion_z_range,
+            ),
+        )
+        save_pose_metric_plot(
+            output_dir
+            / "04_pose_aligned_points"
+            / "five_frame_metric_pose_fusion.png",
+            aligned_frames,
+            frame_ids,
+            camera_origins_xz,
+            args.reference_id,
+            fusion_x_range,
+            fusion_z_range,
+        )
+
         all_points = np.asarray(flat_points, dtype=np.float64).reshape(-1, 2)
         raw_fusion = weighted_raster_fusion(
-            aligned_frames, weights, args.bev_size, x_range, z_range
+            fusion_frames,
+            weights,
+            args.bev_size,
+            fusion_x_range,
+            fusion_z_range,
         )
         save_fusion_stage(
             output_dir / "05_fusion_without_denoise",
-            aligned_frames,
+            fusion_frames,
             raw_fusion,
             frame_ids,
             args.bev_size,
-            x_range,
-            z_range,
+            fusion_x_range,
+            fusion_z_range,
         )
 
         legacy = legacy_denoise(
@@ -746,10 +938,18 @@ def main() -> None:
             )
 
         cluster_fusion = weighted_raster_fusion(
-            clustered_frames, weights, args.bev_size, x_range, z_range
+            clustered_frames,
+            weights,
+            args.bev_size,
+            fusion_x_range,
+            fusion_z_range,
         )
         denoised_fusion = weighted_raster_fusion(
-            denoised_frames, weights, args.bev_size, x_range, z_range
+            denoised_frames,
+            weights,
+            args.bev_size,
+            fusion_x_range,
+            fusion_z_range,
         )
         save_fusion_stage(
             output_dir / "06_legacy_ransac_diagnostic" / "01_after_x_cluster",
@@ -757,8 +957,8 @@ def main() -> None:
             cluster_fusion,
             frame_ids,
             args.bev_size,
-            x_range,
-            z_range,
+            fusion_x_range,
+            fusion_z_range,
         )
         save_fusion_stage(
             output_dir / "06_legacy_ransac_diagnostic" / "02_after_line_ransac",
@@ -766,11 +966,11 @@ def main() -> None:
             denoised_fusion,
             frame_ids,
             args.bev_size,
-            x_range,
-            z_range,
+            fusion_x_range,
+            fusion_z_range,
         )
 
-        z_bins = [(3, 10), (10, 20), (20, 30), (30, 40), (40, 50)]
+        z_bins = [(-10, 0), (0, 3), (3, 10), (10, 20), (20, 30), (30, 40), (40, 50)]
         longitudinal_rows = []
         for z_min, z_max in z_bins:
             raw_bin = (all_points[:, 1] >= z_min) & (all_points[:, 1] < z_max)
@@ -818,13 +1018,25 @@ def main() -> None:
                 "calibration": {
                     "path": str(args.calib.resolve()),
                     "sha256": sha256(args.calib),
-                    "projection_key": projection_key,
+                    "projection_key": calibration["key"],
+                    "projection_matrix": calibration["projection"].tolist(),
                     "K": intrinsic_k.tolist(),
+                    "T_cam_image_cam0": calibration[
+                        "T_cam_image_cam0"
+                    ].tolist(),
+                    "T_cam0_cam_image": calibration[
+                        "T_cam0_cam_image"
+                    ].tolist(),
                 },
                 "poses": {
                     "path": str(args.poses.resolve()),
                     "sha256": sha256(args.poses),
+                    "definition": (
+                        "KITTI odometry T_world_camera0 converted to the P2 image "
+                        "camera before relative alignment"
+                    ),
                 },
+                "provenance": provenance_audit,
             },
             "detector": {
                 "name": "CLRNet",
@@ -842,17 +1054,39 @@ def main() -> None:
                     "Camera height, pitch, and flat road are experiment assumptions, "
                     "not per-frame road-plane ground truth."
                 ),
-                "x_range_m": list(x_range),
-                "z_range_m": list(z_range),
+                "local_x_range_m": list(local_x_range),
+                "local_z_range_m": list(local_z_range),
+                "fusion_x_range_m": list(fusion_x_range),
+                "fusion_z_range_m": list(fusion_z_range),
                 "bev_size_px": [args.bev_size, args.bev_size],
             },
             "pose_alignment": {
                 "formula": "p_ref = inv(T_w_ref) @ T_w_src @ p_src",
                 "reference_frame": args.reference_id,
+                "frames": [
+                    {
+                        "frame_id": frame_id,
+                        "T_world_camera0": poses_cam0[frame_id].tolist(),
+                        "T_world_image_camera": poses[frame_id].tolist(),
+                        "T_reference_from_source": relative_pose.tolist(),
+                        "camera_origin_reference_xz_m": origin.tolist(),
+                        "translation_norm_m": float(
+                            np.linalg.norm(relative_pose[:3, 3])
+                        ),
+                    }
+                    for frame_id, relative_pose, origin in zip(
+                        frame_ids, relative_poses, camera_origins_xz
+                    )
+                ],
             },
             "fusion_without_denoise": {
                 "point_count": int(len(all_points)),
                 "weights": weights.tolist(),
+                "weights_note": (
+                    "User-configured temporal raster weights. The default 0.2,0.4,"
+                    "0.6,0.8,1.0 is a project heuristic, not a value published by "
+                    "KITTI or CLRNet; the metric pose plot itself is unweighted."
+                ),
                 **scalar_metrics(raw_fusion),
             },
             "legacy_ransac_diagnostic": {
@@ -892,7 +1126,46 @@ def main() -> None:
         (metadata_dir / "audit.json").write_text(
             json.dumps(audit, ensure_ascii=False, indent=2), encoding="utf-8"
         )
+        (metadata_dir / "aligned_lane_points.json").write_text(
+            json.dumps(
+                {
+                    "coordinate_system": (
+                        f"metric X/Z in reference image camera frame {args.reference_id}"
+                    ),
+                    "frames": [
+                        {
+                            "frame_id": frame_id,
+                            "camera_origin_reference_xz_m": origin.tolist(),
+                            "lanes_reference_xz_m": [lane.tolist() for lane in lanes],
+                        }
+                        for frame_id, origin, lanes in zip(
+                            frame_ids, camera_origins_xz, aligned_frames
+                        )
+                    ],
+                },
+                ensure_ascii=False,
+                indent=2,
+            ),
+            encoding="utf-8",
+        )
         write_csv(metadata_dir / "frame_metrics.csv", frame_metrics)
+        write_csv(
+            metadata_dir / "pose_alignment.csv",
+            [
+                {
+                    "frame_id": frame_id,
+                    "reference_frame_id": args.reference_id,
+                    "camera_origin_x_ref_m": float(origin[0]),
+                    "camera_origin_z_ref_m": float(origin[1]),
+                    "translation_norm_m": float(
+                        np.linalg.norm(relative_pose[:3, 3])
+                    ),
+                }
+                for frame_id, relative_pose, origin in zip(
+                    frame_ids, relative_poses, camera_origins_xz
+                )
+            ],
+        )
         write_csv(metadata_dir / "legacy_retention_by_lane.csv", retention_rows)
         write_csv(
             metadata_dir / "legacy_retention_by_distance.csv", longitudinal_rows

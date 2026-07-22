@@ -18,6 +18,7 @@ CLRNet/demo_image.py
 
 # Generated outputs.
 outputs/
+workstation_outputs/
 *.png
 *.jpg
 !data/*.png

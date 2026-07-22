@@ -94,6 +94,21 @@ conda run -n surf2026-win python run_demo.py `
   --output-dir outputs\windows_smoke
 ```
 
+For the packaged, from-scratch KITTI Odometry Sequence 00 frames 000000-000004
+pose-fusion reproduction, use the dedicated Windows guide:
+
+- [WINDOWS_KITTI00_FIRST5.md](WINDOWS_KITTI00_FIRST5.md)
+
+The one-command entry point is:
+
+```powershell
+.\scripts\run_kitti00_first5_windows.ps1
+```
+
+It verifies the five image hashes, runs live CLRNet inference, projects ordered
+lane points into metric ground coordinates, aligns all frames to frame 000004,
+and writes both the extended metric pose plot and the final raster outputs.
+
 Do not run `setup_clrnet_mac.sh`, `server_python.sh`, or the unmodified
 `CLRNet/requirements.txt` on Windows. The latter pins legacy binary packages
 that are not the deployment contract for this workstation.

@@ -235,23 +235,27 @@ CLRNet 点最初是原图坐标 `(u,v)`，单位是图像像素，但它们仍�
 - CLRNet模型、权重和一次单图推理不再报错；
 - 之前的结果文件仍保存在 `results/kitti00_first5_lane_bev_fusion/`。
 
-### 尚未闭环
+### 当前已闭环的工作站入口
 
-1. [scripts/check_windows_env.py](scripts/check_windows_env.py#L52-L75) 只验证单图 `detect()`，没有运行 BEV、位姿、去噪和融合。
-2. [surf_bev/pipeline.py](surf_bev/pipeline.py#L65-L112) 的通用多帧入口没有接入成品使用的时间权重和 RANSAC。
-3. [scripts/package_first5_results.py](scripts/package_first5_results.py#L205-L257) 只复制、排版已有结果，不会重新生成检测、BEV或融合。
-4. 完整成品所依赖的检测导出、数据顺序校正、双车道总编排、公用融合和原始RANSAC脚本尚未全部进入 Windows 分支。
-5. 打包的 `metadata/calib.txt` 只有 `P0–P3`，而当前 `load_kitti_calib()` 还要求 `R0_rect` 和 `Tr_velo_to_cam`；因此打包人工对比脚本从现有 metadata 直接重跑会触发缺失键错误。这是明确的复现阻塞项。
-6. 当前 Windows 兼容层使用 Python NMS 后处理，和官方 CUDA NMS 不是严格数值等价；需要在最终复现报告中说明。
+1. [scripts/run_full_point_pipeline.py](scripts/run_full_point_pipeline.py) 从五张原图重新执行 CLRNet、点式 IPM、位姿对齐、未去噪融合和旧 RANSAC 诊断，不复用旧结果图。
+2. [scripts/run_kitti00_first5_windows.ps1](scripts/run_kitti00_first5_windows.ps1) 是 Sequence 00 前五帧的一条命令入口。
+3. 输入图像、`P0–P3` 标定、前五行 pose 和官方来源哈希均已打包；专用入口直接解析 `P2`，不再错误要求当前输入中不存在的 `R0_rect` 或 `Tr_velo_to_cam`。
+4. 位姿融合额外输出扩展米制坐标图、逐帧相机原点、相对 4×4 位姿矩阵和对齐后的浮点坐标，不再依靠一张裁剪 BEV 判断是否使用 pose。
+
+### 仍需说明或继续研究
+
+1. 当前 Windows 兼容层使用 Python NMS 后处理，和官方 CUDA NMS 不是严格数值等价；最终复现报告必须说明。
+2. `1.65 m`、`0°` 和平坦路面是组内假设，仍需做敏感性分析。
+3. 旧 RANSAC 只作为问题诊断，新的去噪方法尚未确定。
 
 ## 9. 建议的解决顺序
 
 - [x] 明确 CLRNet 输出、点、折线和像素 mask 的区别。
 - [x] 确认车道点可以直接做 BEV，不必先画线或 warp 整图。
 - [x] 定位本次远处点删除主要发生在 RANSAC 前的 X 聚类。
-- [ ] 将完整五帧成品生成脚本和所需元数据纳入 Windows 分支。
-- [ ] 建立一条命令的 Windows 端到端复现入口。
-- [ ] 保存未去噪的点式融合基线和逐距离审计。
+- [x] 将完整五帧成品生成脚本和所需元数据纳入 Windows 分支。
+- [x] 建立一条命令的 Windows 端到端复现入口。
+- [x] 保存未去噪的点式融合基线和逐距离审计。
 - [ ] 完成“取消 X 聚类”的最小消融。
 - [ ] 比较 `X=f(Z)` 直线、二次曲线、稳健样条和跨帧中位轨迹。
 - [ ] 选择新去噪方法并确定阈值/权重依据。
