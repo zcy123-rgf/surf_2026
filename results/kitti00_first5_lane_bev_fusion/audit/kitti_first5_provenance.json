@@ -1,0 +1,63 @@
+{
+  "conclusion": "All five images are byte-identical to KITTI Odometry sequence 00 frames 0-4, but supplied filenames were permuted.",
+  "official_raw_archive": "https://s3.eu-central-1.amazonaws.com/avg-kitti/raw_data/2011_10_03_drive_0027/2011_10_03_drive_0027_sync.zip",
+  "official_raw_subdirectory": "2011_10_03/2011_10_03_drive_0027_sync/image_02/data",
+  "supplied_order_as_kitti_frames": [
+    0,
+    4,
+    2,
+    1,
+    3
+  ],
+  "chronological_order_as_supplied_files": [
+    0,
+    3,
+    2,
+    4,
+    1
+  ],
+  "pose_file_byte_equal_to_local_official_kitti_odometry_poses_00": true,
+  "calib_file_matches_first_four_projection_rows_of_kitti_sequence_00": true,
+  "mapping": [
+    {
+      "supplied_file": "0.png",
+      "verified_kitti_sequence": "00",
+      "verified_kitti_frame": 0,
+      "ordered_file": "0.png",
+      "sha256": "af34528f0edd14ddf8ee7ac9017f4b7f540e04e3d50cecce006245d950ea1d6c",
+      "byte_equal_to_official_raw_png": true
+    },
+    {
+      "supplied_file": "3.png",
+      "verified_kitti_sequence": "00",
+      "verified_kitti_frame": 1,
+      "ordered_file": "1.png",
+      "sha256": "cc8a7a3c3fa653b5edec3ac81dd7bda4e5391330c82070d8bc6c3e2831572263",
+      "byte_equal_to_official_raw_png": true
+    },
+    {
+      "supplied_file": "2.png",
+      "verified_kitti_sequence": "00",
+      "verified_kitti_frame": 2,
+      "ordered_file": "2.png",
+      "sha256": "18504a8bf4e71a2273cc31289f0c3fdd1a46942fdd59125a14bb14da58457522",
+      "byte_equal_to_official_raw_png": true
+    },
+    {
+      "supplied_file": "4.png",
+      "verified_kitti_sequence": "00",
+      "verified_kitti_frame": 3,
+      "ordered_file": "3.png",
+      "sha256": "0766814389f2650b556913b07f3b1e2344ad9f1e6e9defef7ccceddd22e2562a",
+      "byte_equal_to_official_raw_png": true
+    },
+    {
+      "supplied_file": "1.png",
+      "verified_kitti_sequence": "00",
+      "verified_kitti_frame": 4,
+      "ordered_file": "4.png",
+      "sha256": "b0d2c7364bdfb75b099d48303ff5e296b1004aa2b5969d81383b8c36c62b2c49",
+      "byte_equal_to_official_raw_png": true
+    }
+  ]
+}

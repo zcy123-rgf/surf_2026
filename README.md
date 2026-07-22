@@ -51,6 +51,68 @@ If the repository was already cloned without submodules:
 git submodule update --init --recursive
 ```
 
+### Windows workstation setup
+
+The Windows workstation path is isolated from the Mac and legacy Linux server
+setups. On the tested workstation profile (Python 3.9, RTX 3090, recent NVIDIA
+driver), clone the Windows branch from **Anaconda PowerShell Prompt**:
+
+```powershell
+Set-Location $HOME
+git clone --recurse-submodules `
+  --branch agent/windows-workstation `
+  --single-branch `
+  https://github.com/zcy123-rgf/surf_2026.git `
+  surf_2026_windows
+Set-Location .\surf_2026_windows
+```
+
+Then run the workstation setup:
+
+```powershell
+Set-ExecutionPolicy -Scope Process Bypass
+.\scripts\setup_clrnet_windows.ps1
+```
+
+The script creates an isolated Python 3.10 `surf2026-win` Conda environment (the
+workstation's base Python 3.9 installation is left unchanged), installs PyTorch
+`2.5.1` with its CUDA 12.1 runtime, initializes CLRNet, downloads the official
+CULane ResNet-18 checkpoint, applies the no-compiler NMS/MMCV compatibility
+layer, and runs one real CLRNet inference smoke test. The CUDA runtime bundled
+with PyTorch is intentionally independent of the larger CUDA capability number
+shown by `nvidia-smi`.
+
+After setup, run the project without relying on PowerShell activation state:
+
+```powershell
+conda run -n surf2026-win python run_demo.py --help
+conda run -n surf2026-win python run_demo.py `
+  --mode single `
+  --detector clrnet `
+  --device cuda `
+  --image data\000001_original.jpg `
+  --output-dir outputs\windows_smoke
+```
+
+For the packaged, from-scratch KITTI Odometry Sequence 00 frames 000000-000004
+pose-fusion reproduction, use the dedicated Windows guide:
+
+- [WINDOWS_KITTI00_FIRST5.md](WINDOWS_KITTI00_FIRST5.md)
+
+The one-command entry point is:
+
+```powershell
+.\scripts\run_kitti00_first5_windows.ps1
+```
+
+It verifies the five image hashes, runs live CLRNet inference, projects ordered
+lane points into metric ground coordinates, aligns all frames to frame 000004,
+and writes both the extended metric pose plot and the final raster outputs.
+
+Do not run `setup_clrnet_mac.sh`, `server_python.sh`, or the unmodified
+`CLRNet/requirements.txt` on Windows. The latter pins legacy binary packages
+that are not the deployment contract for this workstation.
+
 ### Mac demo setup
 
 For the Mac CPU/MPS demo, run:
