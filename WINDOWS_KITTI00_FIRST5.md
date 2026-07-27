@@ -78,6 +78,7 @@ F:\2026_surf\workstation_outputs\kitti00_seq00_first5_pose_fusion
 04_pose_aligned_points/         对齐到第000004帧的逐帧点和米制融合图
 05_fusion_without_denoise/      位姿对齐后、未去噪的融合结果
 06_legacy_ransac_diagnostic/    旧 X 聚类/RANSAC 的诊断对比，不作为最终方法
+07_temporal_consensus_candidate/ 留一帧跨帧一致性候选；证据不足的点默认保留
 ```
 
 先检查：
@@ -86,11 +87,33 @@ F:\2026_surf\workstation_outputs\kitti00_seq00_first5_pose_fusion
 04_pose_aligned_points/five_frame_metric_pose_fusion.png
 05_fusion_without_denoise/accumulated_points_by_frame.png
 05_fusion_without_denoise/weighted_score_heatmap.png
+07_temporal_consensus_candidate/weighted_score_heatmap.png
 00_metadata/pose_alignment.csv
 00_metadata/audit.json
 ```
 
-## 5. 关于 `0.2,0.4,0.6,0.8,1.0`
+## 5. 新的保守去噪候选
+
+完整流程会同时输出旧 RANSAC 诊断和新的留一帧跨帧候选。新方法对当前点只使用“其他帧、同一侧、相同纵向位置”的预测，不允许当前帧支持自己的点；少于两个其他帧支持的点默认保留。
+
+当前实验候选参数为：
+
+```text
+基础阈值        0.30 m
+MAD 倍数        3.0
+最大阈值        1.00 m
+最少其他帧数    2
+```
+
+这些参数来自受控异常注入和远处保留约束，不是 KITTI 或 CLRNet 官方参数。当前 PowerShell 包装脚本会使用这组 Python 默认参数。运行后可在以下文件核验：
+
+```text
+00_metadata/audit.json
+00_metadata/temporal_retention_by_lane.csv
+00_metadata/temporal_retention_by_distance.csv
+```
+
+## 6. 关于 `0.2,0.4,0.6,0.8,1.0`
 
 这些只是项目此前使用的时间递增栅格权重，不是 KITTI、CLRNet 或 RANSAC 论文给出的参数。米制位姿融合图不使用这些权重；只有融合热力图使用。若要做等权基线：
 

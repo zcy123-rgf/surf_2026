@@ -80,7 +80,11 @@ def main() -> None:
             output / "04_pose_aligned_points" / "five_frame_metric_pose_fusion.png",
             output / "05_fusion_without_denoise" / "accumulated_points_by_frame.png",
             output / "05_fusion_without_denoise" / "weighted_score_heatmap.png",
+            output
+            / "07_temporal_consensus_candidate"
+            / "weighted_score_heatmap.png",
             output / "00_metadata" / "pose_alignment.csv",
+            output / "00_metadata" / "temporal_retention_by_distance.csv",
             output / "00_metadata" / "aligned_lane_points.json",
             output / "00_metadata" / "audit.json",
             output / "00_metadata" / "manifest.json",
@@ -98,6 +102,9 @@ def main() -> None:
         )
         assert audit["pose_alignment"]["reference_frame"] == 4
         assert len(audit["pose_alignment"]["frames"]) == 5
+        temporal = audit["temporal_consensus_candidate"]
+        assert temporal["kept_points"] == temporal["raw_points"]
+        assert temporal["parameters"]["threshold_cap_m"] == 1.0
         print("Fresh-output end-to-end smoke test passed.")
 
 

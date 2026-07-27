@@ -40,6 +40,9 @@ from surf_bev.geometry import (  # noqa: E402
     load_kitti_poses,
     transform_lane_points_by_pose,
 )
+from surf_bev.temporal_denoise import (  # noqa: E402
+    leave_one_out_consensus_mask,
+)
 
 
 FRAME_COLORS_BGR = [
@@ -82,6 +85,10 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--weights", default="0.2,0.4,0.6,0.8,1.0")
     parser.add_argument("--legacy-ransac-iterations", type=int, default=100)
     parser.add_argument("--legacy-ransac-threshold", type=float, default=0.3)
+    parser.add_argument("--temporal-base-threshold", type=float, default=0.30)
+    parser.add_argument("--temporal-mad-multiplier", type=float, default=3.0)
+    parser.add_argument("--temporal-threshold-cap", type=float, default=1.00)
+    parser.add_argument("--temporal-min-other-frames", type=int, default=2)
     parser.add_argument("--seed", type=int, default=20260717)
     parser.add_argument("--clrnet-root", type=Path, default=ROOT / "CLRNet")
     parser.add_argument(
@@ -655,6 +662,16 @@ def main() -> None:
         raise ValueError("Frame IDs must be a non-empty list without duplicates.")
     if not np.isfinite(weights).all() or np.any(weights < 0) or np.sum(weights) <= 0:
         raise ValueError("Weights must be finite, non-negative, and have a positive sum.")
+    if (
+        args.temporal_base_threshold <= 0
+        or args.temporal_mad_multiplier <= 0
+        or args.temporal_threshold_cap < args.temporal_base_threshold
+        or args.temporal_min_other_frames < 1
+    ):
+        raise ValueError(
+            "Temporal denoising requires positive thresholds/multiplier/support, "
+            "and the threshold cap must be >= the base threshold."
+        )
     if args.reference_id not in frame_ids:
         raise ValueError("Reference ID must be one of the requested frame IDs.")
 
@@ -986,6 +1003,63 @@ def main() -> None:
                 }
             )
 
+        temporal_membership, temporal_details = leave_one_out_consensus_mask(
+            all_points,
+            point_ranges,
+            base_threshold=args.temporal_base_threshold,
+            mad_multiplier=args.temporal_mad_multiplier,
+            threshold_cap=args.temporal_threshold_cap,
+            minimum_other_frames=args.temporal_min_other_frames,
+        )
+        temporal_frames: list[list[np.ndarray]] = [[] for _ in aligned_frames]
+        temporal_retention_rows: list[dict[str, object]] = []
+        for record in point_ranges:
+            start = int(record["start"])
+            end = int(record["end"])
+            lane = all_points[start:end]
+            keep = temporal_membership[start:end]
+            frame_index = int(record["frame_index"])
+            temporal_frames[frame_index].extend(split_runs(lane, keep))
+            temporal_retention_rows.append(
+                {
+                    "frame_id": record["frame_id"],
+                    "side": record["side"],
+                    "raw_points": len(lane),
+                    "kept_points": int(np.count_nonzero(keep)),
+                    "retention_fraction": float(np.mean(keep)) if len(keep) else 0.0,
+                }
+            )
+        temporal_fusion = weighted_raster_fusion(
+            temporal_frames,
+            weights,
+            args.bev_size,
+            fusion_x_range,
+            fusion_z_range,
+        )
+        save_fusion_stage(
+            output_dir / "07_temporal_consensus_candidate",
+            temporal_frames,
+            temporal_fusion,
+            frame_ids,
+            args.bev_size,
+            fusion_x_range,
+            fusion_z_range,
+        )
+        temporal_longitudinal_rows = []
+        for z_min, z_max in z_bins:
+            raw_bin = (all_points[:, 1] >= z_min) & (all_points[:, 1] < z_max)
+            raw_count = int(np.count_nonzero(raw_bin))
+            kept_count = int(np.count_nonzero(raw_bin & temporal_membership))
+            temporal_longitudinal_rows.append(
+                {
+                    "z_min_m": z_min,
+                    "z_max_m": z_max,
+                    "raw_points": raw_count,
+                    "kept_points": kept_count,
+                    "retention_fraction": kept_count / raw_count if raw_count else 0.0,
+                }
+            )
+
         audit = {
             "status": "complete",
             "method_scope": {
@@ -995,6 +1069,10 @@ def main() -> None:
                 "legacy_denoise_warning": (
                     "Diagnostic baseline only. Fixed-X clustering is known to remove "
                     "long-range points and is not the final denoising method."
+                ),
+                "temporal_candidate": (
+                    "Leave-one-frame-out same-side X(Z) consensus. Unsupported "
+                    "points are kept; parameters are experiment-tuned candidates."
                 ),
             },
             "environment": {
@@ -1105,6 +1183,28 @@ def main() -> None:
                 "retention_by_lane": retention_rows,
                 "retention_by_longitudinal_bin": longitudinal_rows,
             },
+            "temporal_consensus_candidate": {
+                "method": (
+                    "leave-one-frame-out median X at the same Z, with MAD-adaptive "
+                    "threshold; the current frame never supports its own point"
+                ),
+                "parameters": temporal_details,
+                "parameter_provenance": (
+                    "Selected by controlled outlier-injection experiments with "
+                    "real/far/manual-pseudo-label retention constraints; not a "
+                    "published KITTI or CLRNet parameter."
+                ),
+                "raw_points": int(len(all_points)),
+                "kept_points": int(np.count_nonzero(temporal_membership)),
+                "point_retention_fraction": float(np.mean(temporal_membership)),
+                "fusion": scalar_metrics(temporal_fusion),
+                "retention_by_lane": temporal_retention_rows,
+                "retention_by_longitudinal_bin": temporal_longitudinal_rows,
+                "warning": (
+                    "Candidate method only. Injection results do not replace lane "
+                    "ground truth, and longer sequences still require validation."
+                ),
+            },
             "image_color_conventions_bgr": {
                 "left_right": [list(color) for color in LANE_COLORS_BGR],
                 "frames": [list(color) for color in FRAME_COLORS_BGR],
@@ -1169,6 +1269,14 @@ def main() -> None:
         write_csv(metadata_dir / "legacy_retention_by_lane.csv", retention_rows)
         write_csv(
             metadata_dir / "legacy_retention_by_distance.csv", longitudinal_rows
+        )
+        write_csv(
+            metadata_dir / "temporal_retention_by_lane.csv",
+            temporal_retention_rows,
+        )
+        write_csv(
+            metadata_dir / "temporal_retention_by_distance.csv",
+            temporal_longitudinal_rows,
         )
         status_path.write_text(
             json.dumps(
