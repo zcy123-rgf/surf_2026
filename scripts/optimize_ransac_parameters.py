@@ -35,8 +35,9 @@ import scripts.evaluate_denoise_methods as base  # noqa: E402
 import scripts.optimize_temporal_denoise as injection  # noqa: E402
 
 
-DEFAULT_PACKAGE = ROOT / "input_data" / "kitti00_first5"
-DEFAULT_DATA = DEFAULT_PACKAGE
+DEFAULT_ANNOTATION = (
+    ROOT / "annotations" / "kitti00_first5_manual_annotations.json"
+)
 
 PHASE1_SEED_OFFSET = 100_000
 PHASE2_SEED_OFFSET = 200_000
@@ -51,20 +52,20 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--clrnet-json",
         type=Path,
-        default=DEFAULT_DATA / "clrnet_lanes.json",
+        required=True,
     )
     parser.add_argument(
         "--manual-json",
         type=Path,
-        default=DEFAULT_DATA / "manual_annotations.json",
+        default=DEFAULT_ANNOTATION,
     )
     parser.add_argument(
-        "--calib", type=Path, default=DEFAULT_PACKAGE / "calib.txt"
+        "--calib", type=Path, required=True
     )
     parser.add_argument(
         "--poses",
         type=Path,
-        default=DEFAULT_PACKAGE / "poses_00_first5.txt",
+        required=True,
     )
     parser.add_argument(
         "--output-dir",

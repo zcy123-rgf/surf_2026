@@ -1,9 +1,9 @@
 [CmdletBinding()]
 param(
     [string]$EnvName = "surf2026-win",
-    [string]$InputRoot = "",
+    [string]$DatasetRoot = "F:\BaiduNetdiskDownload\kitti\odometry",
     [string]$ImageDir = "",
-    [string]$ImagePattern = "frame_{frame_id:06d}.png",
+    [string]$ImagePattern = "{frame_id:06d}.png",
     [string]$Calib = "",
     [string]$Poses = "",
     [string]$ManualJson = "",
@@ -24,20 +24,16 @@ if (-not (Get-Command conda -ErrorAction SilentlyContinue)) {
     throw "Conda was not found. Open Anaconda PowerShell Prompt and retry."
 }
 
-if ([string]::IsNullOrWhiteSpace($InputRoot)) {
-    $InputRoot = Join-Path $RootDir "input_data\kitti00_first5"
-}
-if ([string]::IsNullOrWhiteSpace($ImageDir)) {
-    $ImageDir = Join-Path $InputRoot "images"
-}
-if ([string]::IsNullOrWhiteSpace($Calib)) {
-    $Calib = Join-Path $InputRoot "calib.txt"
-}
-if ([string]::IsNullOrWhiteSpace($Poses)) {
-    $Poses = Join-Path $InputRoot "poses_00_first5.txt"
-}
+. (Join-Path $PSScriptRoot "kitti00_workstation_input.ps1")
+$Kitti = Resolve-Kitti00WorkstationInput -DatasetRoot $DatasetRoot
+$Verification = Test-Kitti00FirstFiveInput `
+    -InputPaths $Kitti `
+    -RequireCompleteSequence
+if ([string]::IsNullOrWhiteSpace($ImageDir)) { $ImageDir = $Kitti.ImageDir }
+if ([string]::IsNullOrWhiteSpace($Calib)) { $Calib = $Kitti.Calib }
+if ([string]::IsNullOrWhiteSpace($Poses)) { $Poses = $Kitti.Poses }
 if ([string]::IsNullOrWhiteSpace($ManualJson)) {
-    $ManualJson = Join-Path $InputRoot "manual_annotations.json"
+    $ManualJson = Join-Path $RootDir "annotations\kitti00_first5_manual_annotations.json"
 }
 if ([string]::IsNullOrWhiteSpace($OutputRoot)) {
     $Stamp = Get-Date -Format "yyyyMMdd_HHmmss"
@@ -56,6 +52,10 @@ $Missing = $Required | Where-Object { -not (Test-Path -LiteralPath $_) }
 if ($Missing) {
     throw "Required inputs are missing:`n$($Missing -join [Environment]::NewLine)"
 }
+
+Write-Host "Dataset root: $DatasetRoot"
+Write-Host "Resolved layout: $($Verification.Layout)"
+Write-Host "Verified full sequence: $($Verification.ImageCount) images, $($Verification.PoseRows) poses."
 if (
     -not [string]::IsNullOrWhiteSpace($Provenance) -and
     -not (Test-Path -LiteralPath $Provenance)

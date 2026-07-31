@@ -33,35 +33,32 @@ from surf_bev.temporal_denoise import (  # noqa: E402
 )
 
 
-DEFAULT_SOURCE = (
-    ROOT
-    / "input_data"
-    / "kitti00_first5"
+DEFAULT_ANNOTATION = (
+    ROOT / "annotations" / "kitti00_first5_manual_annotations.json"
 )
 
 
 def parse_args() -> argparse.Namespace:
-    package = ROOT / "input_data" / "kitti00_first5"
     parser = argparse.ArgumentParser(
         description="Optimize leave-one-frame-out temporal point denoising."
     )
     parser.add_argument(
         "--clrnet-json",
         type=Path,
-        default=DEFAULT_SOURCE / "clrnet_lanes.json",
+        required=True,
     )
     parser.add_argument(
         "--manual-json",
         type=Path,
-        default=DEFAULT_SOURCE / "manual_annotations.json",
+        default=DEFAULT_ANNOTATION,
     )
     parser.add_argument(
-        "--calib", type=Path, default=package / "calib.txt"
+        "--calib", type=Path, required=True
     )
     parser.add_argument(
         "--poses",
         type=Path,
-        default=package / "poses_00_first5.txt",
+        required=True,
     )
     parser.add_argument(
         "--output-dir",

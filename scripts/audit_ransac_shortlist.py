@@ -32,22 +32,22 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--clrnet-json",
         type=Path,
-        default=opt.DEFAULT_DATA / "clrnet_lanes.json",
+        required=True,
     )
     parser.add_argument(
         "--manual-json",
         type=Path,
-        default=opt.DEFAULT_DATA / "manual_annotations.json",
+        default=opt.DEFAULT_ANNOTATION,
     )
     parser.add_argument(
         "--calib",
         type=Path,
-        default=opt.DEFAULT_PACKAGE / "calib.txt",
+        required=True,
     )
     parser.add_argument(
         "--poses",
         type=Path,
-        default=opt.DEFAULT_PACKAGE / "poses_00_first5.txt",
+        required=True,
     )
     parser.add_argument(
         "--source-dir",

@@ -1,6 +1,7 @@
 [CmdletBinding()]
 param(
     [string]$EnvName = "surf2026-win",
+    [string]$DatasetRoot = "F:\BaiduNetdiskDownload\kitti\odometry",
     [string]$OutputDir = "",
     [ValidateSet("cuda", "cpu")]
     [string]$Device = "cuda",
@@ -16,27 +17,25 @@ if (-not (Get-Command conda -ErrorAction SilentlyContinue)) {
 }
 
 if ([string]::IsNullOrWhiteSpace($OutputDir)) {
-    $OutputDir = Join-Path $RootDir "workstation_outputs\kitti00_seq00_first5_pose_fusion"
+    $Stamp = Get-Date -Format "yyyyMMdd_HHmmss"
+    $OutputDir = Join-Path $RootDir "workstation_outputs\kitti00_first5_$Stamp"
 }
 
-$ImageDir = Join-Path $RootDir "results\kitti00_first5_lane_bev_fusion\01_original_frames"
-$Calib = Join-Path $RootDir "results\kitti00_first5_lane_bev_fusion\metadata\calib.txt"
-$Poses = Join-Path $RootDir "results\kitti00_first5_lane_bev_fusion\metadata\poses_00_first5.txt"
-$Provenance = Join-Path $RootDir "results\kitti00_first5_lane_bev_fusion\audit\kitti_first5_provenance.json"
-
-$Required = @($ImageDir, $Calib, $Poses, $Provenance)
-$Missing = $Required | Where-Object { -not (Test-Path -LiteralPath $_) }
-if ($Missing) {
-    throw "Required packaged inputs are missing:`n$($Missing -join [Environment]::NewLine)"
-}
+. (Join-Path $PSScriptRoot "kitti00_workstation_input.ps1")
+$Kitti = Resolve-Kitti00WorkstationInput -DatasetRoot $DatasetRoot
+$Verification = Test-Kitti00FirstFiveInput `
+    -InputPaths $Kitti `
+    -RequireCompleteSequence
+$ImageDir = $Kitti.ImageDir
+$Calib = $Kitti.Calib
+$Poses = $Kitti.Poses
 
 $PythonArgs = @(
     "scripts\run_full_point_pipeline.py",
     "--image-dir", $ImageDir,
-    "--image-pattern", "frame_{frame_id:06d}.png",
+    "--image-pattern", "{frame_id:06d}.png",
     "--calib", $Calib,
     "--poses", $Poses,
-    "--provenance", $Provenance,
     "--frame-ids", "0,1,2,3,4",
     "--reference-id", "4",
     "--local-x-range=-10,10",
@@ -49,6 +48,9 @@ $PythonArgs = @(
 )
 
 Write-Host "Running KITTI Odometry Sequence 00 frames 000000-000004."
+Write-Host "Dataset root: $DatasetRoot"
+Write-Host "Resolved layout: $($Verification.Layout)"
+Write-Host "Verified full sequence: $($Verification.ImageCount) images, $($Verification.PoseRows) poses."
 Write-Host "Reference frame: 000004"
 Write-Host "Output directory: $OutputDir"
 & conda run --no-capture-output -n $EnvName python @PythonArgs
