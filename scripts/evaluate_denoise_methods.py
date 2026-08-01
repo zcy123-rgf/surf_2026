@@ -36,6 +36,11 @@ from surf_bev.geometry import (  # noqa: E402
     load_kitti_poses,
     transform_lane_points_by_pose,
 )
+from surf_bev.point_export import (  # noqa: E402
+    build_point_decision_rows,
+    build_point_sets_document,
+    rows_for_method,
+)
 
 
 FRAME_COLORS_BGR = [
@@ -863,6 +868,15 @@ def main() -> None:
         imwrite(method_dir / "weighted_heatmap.png", fusion["heatmap"])
         imwrite(method_dir / "weighted_binary.png", fusion["binary"])
         plot_points(method_dir / "metric_plot.png", frames, name)
+        method_rows = build_point_decision_rows(points, ranges, {name: mask})
+        write_csv(
+            method_dir / "kept_points_xz.csv",
+            rows_for_method(method_rows, name, kept=True),
+        )
+        write_csv(
+            method_dir / "rejected_points_xz.csv",
+            rows_for_method(method_rows, name, kept=False),
+        )
         metrics = method_metrics(
             name, points, ranges, mask, manual_points, fusion
         )
@@ -938,6 +952,34 @@ def main() -> None:
     hard_filter_name = str(hard_filter["method"])
 
     audit_dir = args.output_dir / "00_audit"
+    audit_dir.mkdir(parents=True, exist_ok=True)
+    method_masks = {
+        name: np.asarray(result["mask"], dtype=bool)
+        for name, result in results.items()
+    }
+    all_decision_rows = build_point_decision_rows(points, ranges, method_masks)
+    point_sets = build_point_sets_document(
+        points,
+        ranges,
+        method_masks,
+        coordinate_system=(
+            "metric X/Z in reference image camera frame 4; "
+            "X right, Z forward, metres"
+        ),
+        metadata={
+            "recommended_method": recommended_name,
+            "conservative_gate_method": conservative_gate_name,
+            "best_hard_filter_candidate": hard_filter_name,
+            "warning": (
+                "Method selection uses retention and consistency without KITTI "
+                "lane ground truth; pseudo-label agreement is not accuracy."
+            ),
+        },
+    )
+    (audit_dir / "denoised_point_sets.json").write_text(
+        json.dumps(point_sets, ensure_ascii=False, indent=2), encoding="utf-8"
+    )
+    write_csv(audit_dir / "point_decisions.csv", all_decision_rows)
     write_csv(audit_dir / "method_metrics.csv", metric_rows)
     write_csv(audit_dir / "longitudinal_retention.csv", distance_rows)
     write_csv(audit_dir / "per_frame_lane_retention.csv", per_lane_rows)

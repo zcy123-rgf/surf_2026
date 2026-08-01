@@ -40,6 +40,11 @@ from surf_bev.geometry import (  # noqa: E402
     load_kitti_poses,
     transform_lane_points_by_pose,
 )
+from surf_bev.point_export import (  # noqa: E402
+    build_point_decision_rows,
+    build_point_sets_document,
+    rows_for_method,
+)
 from surf_bev.temporal_denoise import (  # noqa: E402
     leave_one_out_consensus_mask,
 )
@@ -1212,6 +1217,59 @@ def main() -> None:
         }
 
         metadata_dir = output_dir / "00_metadata"
+        exported_masks = {
+            "raw_no_denoise": np.ones(len(all_points), dtype=bool),
+            "legacy_after_x_cluster": cluster_membership,
+            "legacy_after_line_ransac": final_membership,
+            "temporal_consensus_candidate": temporal_membership,
+        }
+        point_decision_rows = build_point_decision_rows(
+            all_points, point_ranges, exported_masks
+        )
+        point_sets = build_point_sets_document(
+            all_points,
+            point_ranges,
+            exported_masks,
+            coordinate_system=(
+                f"metric X/Z in reference image camera frame {args.reference_id}; "
+                "X right, Z forward, metres"
+            ),
+            metadata={
+                "reference_frame_id": args.reference_id,
+                "source": "live CLRNet -> point IPM -> KITTI pose alignment",
+                "warning": (
+                    "legacy_after_line_ransac is a diagnostic baseline; "
+                    "temporal_consensus_candidate is not an approved final model"
+                ),
+            },
+        )
+        (metadata_dir / "denoised_point_sets.json").write_text(
+            json.dumps(point_sets, ensure_ascii=False, indent=2), encoding="utf-8"
+        )
+        write_csv(
+            metadata_dir / "denoising_point_decisions.csv", point_decision_rows
+        )
+        stage_exports = {
+            "raw_no_denoise": output_dir / "05_fusion_without_denoise",
+            "legacy_after_x_cluster": (
+                output_dir / "06_legacy_ransac_diagnostic" / "01_after_x_cluster"
+            ),
+            "legacy_after_line_ransac": (
+                output_dir / "06_legacy_ransac_diagnostic" / "02_after_line_ransac"
+            ),
+            "temporal_consensus_candidate": (
+                output_dir / "07_temporal_consensus_candidate"
+            ),
+        }
+        for method, stage_dir in stage_exports.items():
+            write_csv(
+                stage_dir / "kept_points_xz.csv",
+                rows_for_method(point_decision_rows, method, kept=True),
+            )
+            write_csv(
+                stage_dir / "rejected_points_xz.csv",
+                rows_for_method(point_decision_rows, method, kept=False),
+            )
         (metadata_dir / "detected_lane_points.json").write_text(
             json.dumps(
                 {

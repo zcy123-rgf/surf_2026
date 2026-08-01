@@ -54,3 +54,24 @@ Set-ExecutionPolicy -Scope Process Bypass
 
 每次运行都写入新的 `workstation_outputs` 时间戳目录；脚本不读取
 `results` 或既有 `workstation_outputs`。
+
+## 精确点集输出
+
+主流程在 `01_from_scratch_pipeline\00_metadata` 写出：
+
+```text
+denoised_point_sets.json
+denoising_point_decisions.csv
+```
+
+RANSAC比较流程在 `02_ransac_method_comparison\00_audit` 写出：
+
+```text
+denoised_point_sets.json
+point_decisions.csv
+```
+
+JSON按方法、帧和左右侧分别保存保留点与剔除点的米制 `(X,Z)` 坐标；
+CSV每个源点一行，并用0/1列记录各方法的保留决定。各方法文件夹也分别
+包含 `kept_points_xz.csv` 和 `rejected_points_xz.csv`。这些文件直接来自
+用于绘制PNG的内存点集，不从PNG反推坐标。

@@ -167,6 +167,8 @@ Write-Host "  01_from_scratch_pipeline\00_metadata\audit.json"
 Write-Host "  01_from_scratch_pipeline\04_pose_aligned_points\five_frame_metric_pose_fusion.png"
 Write-Host "  02_ransac_method_comparison\comparison\main_comparison.png"
 Write-Host "  02_ransac_method_comparison\00_audit\evaluation.json"
+Write-Host "  02_ransac_method_comparison\00_audit\denoised_point_sets.json"
+Write-Host "  02_ransac_method_comparison\00_audit\point_decisions.csv"
 if ($Mode -eq "Full") {
     Write-Host "  04_ransac_safety_expansion\FINAL_RANSAC_REPORT_ZH.md"
     Write-Host "  05_ransac_heldout_audit\HELDOUT_AUDIT_REPORT_ZH.md"
