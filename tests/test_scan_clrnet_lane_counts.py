@@ -58,6 +58,37 @@ def test_metric_bev_gate_splits_run_even_when_candidate_count_is_two():
     assert result["frame_ids"] == [5, 6, 7, 8, 9]
 
 
+def test_exact_aligned_gate_rejects_points_outside_fusion_range():
+    input_rows = rows([2] * 10)
+    for row in input_rows:
+        row["eligible_for_two_curve_fit"] = True
+    poses = []
+    ground_lanes = {}
+    for frame_id in range(10):
+        pose = np.eye(4, dtype=np.float64)
+        pose[2, 3] = frame_id * 0.1
+        poses.append(pose)
+        x_left = 25.0 if frame_id == 4 else -3.0
+        ground_lanes[frame_id] = [
+            np.column_stack([np.full(4, x_left), np.arange(5.0, 9.0)]),
+            np.column_stack([np.full(4, 3.0), np.arange(5.0, 9.0)]),
+        ]
+    result = SCANNER.select_window_with_aligned_points(
+        input_rows,
+        poses,
+        ground_lanes,
+        segment_size=5,
+        minimum_candidates=2,
+        minimum_points_per_side=4,
+        fusion_x_range=(-20.0, 20.0),
+        fusion_z_range=(-20.0, 50.0),
+        camera_height=1.65,
+        pitch_deg=0.0,
+    )
+    assert result["status"] == "selected"
+    assert result["frame_ids"] == [5, 6, 7, 8, 9]
+
+
 def test_selects_longest_run_and_trims_to_segment_multiple():
     result = SCANNER.select_window(
         rows([2] * 8 + [1] + [2] * 6), make_poses(15, curved_from=9), segment_size=5

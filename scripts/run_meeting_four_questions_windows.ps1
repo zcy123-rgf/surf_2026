@@ -157,6 +157,8 @@ if (-not $SkipCurvedCandidates) {
                     "--minimum-candidates", "2",
                     "--minimum-bev-points-per-side", "4",
                     "--local-z-range=3,50",
+                    "--fusion-x-range=-20,20",
+                    "--fusion-z-range=-20,50",
                     "--device", $Device,
                     "--output-dir", $ScanDir
                 )
