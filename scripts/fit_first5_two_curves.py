@@ -1,4 +1,4 @@
-"""Fit the first five pose-aligned lane observations as two smooth curves.
+"""Fit consecutive pose-aligned lane observations as two smooth curves.
 
 This experiment is deliberately separate from the legacy RANSAC pipeline.  It
 does not reject points merely to increase raster overlap.  The left and right
@@ -43,9 +43,8 @@ from surf_bev.geometry import (  # noqa: E402
 
 SIDES = ("left", "right")
 SIDE_COLORS = {"left": "#1f77b4", "right": "#d62728"}
-FRAME_COLORS = ["#4c78a8", "#f58518", "#54a24b", "#e45756", "#9d755d"]
 FUSION_X_RANGE = (-15.0, 15.0)
-FUSION_Z_RANGE = (-10.0, 50.0)
+FUSION_Z_RANGE = (-20.0, 50.0)
 
 
 @dataclass
@@ -66,7 +65,7 @@ class CurveFit:
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Fit five pose-aligned lane point sets as left/right splines."
+        description="Fit consecutive pose-aligned lane point sets as left/right splines."
     )
     source = parser.add_mutually_exclusive_group(required=True)
     source.add_argument(
@@ -82,7 +81,10 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--calib", type=Path)
     parser.add_argument("--poses", type=Path)
     parser.add_argument("--manual-json", type=Path)
+    parser.add_argument("--frame-ids", default="0,1,2,3,4")
     parser.add_argument("--reference-id", type=int, default=4)
+    parser.add_argument("--x-range", default="-15,15")
+    parser.add_argument("--z-range", default="-20,50")
     parser.add_argument("--camera-height", type=float, default=1.65)
     parser.add_argument("--pitch-deg", type=float, default=0.0)
     parser.add_argument("--bin-size-m", type=float, default=0.50)
@@ -96,6 +98,17 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--curve-samples", type=int, default=500)
     parser.add_argument("--output-dir", type=Path, required=True)
     return parser.parse_args()
+
+
+def parse_ints(value: str) -> list[int]:
+    return [int(item.strip()) for item in value.split(",") if item.strip()]
+
+
+def parse_range(value: str, option: str) -> tuple[float, float]:
+    items = [float(item.strip()) for item in value.split(",") if item.strip()]
+    if len(items) != 2 or items[0] >= items[1]:
+        raise ValueError(f"{option} requires two increasing comma-separated values.")
+    return items[0], items[1]
 
 
 def sha256(path: Path) -> str:
@@ -291,12 +304,16 @@ def load_manual_frames(
     )
 
 
-def validate_frames(frames: list[dict[str, object]]) -> None:
+def validate_frames(
+    frames: list[dict[str, object]], expected_frame_ids: list[int]
+) -> None:
     frame_ids = [int(frame["frame_id"]) for frame in frames]
-    if len(frames) != 5 or frame_ids != [0, 1, 2, 3, 4]:
+    if frame_ids != expected_frame_ids:
         raise ValueError(
-            f"This first experiment requires frames 0..4 exactly; received {frame_ids}."
+            f"Expected frames {expected_frame_ids}; received {frame_ids}."
         )
+    if len(frames) < 5:
+        raise ValueError("At least five consecutive frames are required.")
     for frame in frames:
         if len(frame["lanes"]) != 2:
             raise ValueError(f"Frame {frame['frame_id']} does not contain two lanes.")
@@ -426,7 +443,8 @@ def leave_one_frame_out(
 ) -> dict[str, object]:
     side_distances: dict[str, list[np.ndarray]] = {side: [] for side in SIDES}
     fold_rows = []
-    for held_out in range(5):
+    frame_ids = [int(frame["frame_id"]) for frame in frames]
+    for held_out in frame_ids:
         train_frames = [frame for frame in frames if int(frame["frame_id"]) != held_out]
         held_frame = next(frame for frame in frames if int(frame["frame_id"]) == held_out)
         for side_index, side in enumerate(SIDES):
@@ -573,7 +591,7 @@ def no_crossing_check(fits: dict[str, CurveFit]) -> dict[str, object]:
         "minimum_right_minus_left_m": float(np.min(widths)),
         "median_right_minus_left_m": float(np.median(widths)),
         "curves_cross": bool(np.any(widths <= 0.0)),
-        "note": "X is rightward in the frame-4 reference camera coordinate system.",
+        "note": "X is rightward in the selected reference camera coordinate system.",
     }
 
 
@@ -582,8 +600,11 @@ def plot_fit(
     frames: list[dict[str, object]],
     fits: dict[str, CurveFit],
     title: str,
+    reference_id: int,
 ) -> None:
     figure, axis = plt.subplots(figsize=(7.2, 10.0))
+    color_map = plt.get_cmap("viridis")
+    color_norm = plt.Normalize(vmin=0, vmax=max(len(frames) - 1, 1))
     for frame_index, frame in enumerate(frames):
         for side_index, side in enumerate(SIDES):
             points = np.asarray(frame["lanes"][side_index])
@@ -592,8 +613,12 @@ def plot_fit(
                 points[:, 1],
                 s=8,
                 alpha=0.38,
-                color=FRAME_COLORS[frame_index],
-                label=f"frame {frame['frame_id']}" if side_index == 0 else None,
+                color=color_map(color_norm(frame_index)),
+                label=(
+                    f"frame {frame['frame_id']}"
+                    if len(frames) <= 5 and side_index == 0
+                    else None
+                ),
             )
     for side in SIDES:
         fit = fits[side]
@@ -605,13 +630,18 @@ def plot_fit(
             label=f"{side} robust cubic B-spline",
         )
     axis.set_title(title)
-    axis.set_xlabel("X right in frame 000004 reference [m]")
-    axis.set_ylabel("Z forward in frame 000004 reference [m]")
+    axis.set_xlabel(f"X right in frame {reference_id:06d} reference [m]")
+    axis.set_ylabel(f"Z forward in frame {reference_id:06d} reference [m]")
     axis.set_xlim(FUSION_X_RANGE)
     axis.set_ylim(FUSION_Z_RANGE)
     axis.set_aspect("equal", adjustable="box")
     axis.grid(True, linewidth=0.5, alpha=0.35)
     axis.legend(loc="best", fontsize=8)
+    if len(frames) > 5:
+        scalar = plt.cm.ScalarMappable(norm=color_norm, cmap=color_map)
+        scalar.set_array([])
+        colorbar = figure.colorbar(scalar, ax=axis, pad=0.02)
+        colorbar.set_label("frame order")
     figure.tight_layout()
     path.parent.mkdir(parents=True, exist_ok=True)
     figure.savefig(path, dpi=220)
@@ -675,11 +705,14 @@ def export_fit(
     )
 
 
-def model_document(fits: dict[str, CurveFit]) -> dict[str, object]:
+def model_document(
+    fits: dict[str, CurveFit], reference_id: int
+) -> dict[str, object]:
     return {
         "model": "robust cubic parametric B-spline",
         "coordinate_system": (
-            "metric X/Z in reference image camera frame 4; X right, Z forward"
+            f"metric X/Z in reference image camera frame {reference_id}; "
+            "X right, Z forward"
         ),
         "curves": {
             side: {
@@ -698,7 +731,17 @@ def model_document(fits: dict[str, CurveFit]) -> dict[str, object]:
 
 
 def main() -> None:
+    global FUSION_X_RANGE, FUSION_Z_RANGE
     args = parse_args()
+    frame_ids = parse_ints(args.frame_ids)
+    if not frame_ids:
+        raise ValueError("--frame-ids must contain at least five frame IDs.")
+    if frame_ids != list(range(frame_ids[0], frame_ids[-1] + 1)):
+        raise ValueError("--frame-ids must be one consecutive increasing interval.")
+    if args.reference_id not in frame_ids:
+        raise ValueError("--reference-id must be included in --frame-ids.")
+    FUSION_X_RANGE = parse_range(args.x_range, "--x-range")
+    FUSION_Z_RANGE = parse_range(args.z_range, "--z-range")
     required = [args.aligned_json or args.clrnet_json]
     if args.clrnet_json is not None:
         if args.calib is None or args.poses is None:
@@ -732,7 +775,7 @@ def main() -> None:
             args.pitch_deg,
         )
         source_mode = "saved CLRNet image points reconstructed to metric coordinates"
-    validate_frames(frames)
+    validate_frames(frames, frame_ids)
 
     trial_summaries = []
     for smoothing in smoothing_grid:
@@ -763,7 +806,8 @@ def main() -> None:
             trial_dir / "two_curves.png",
             frames,
             trial_fits,
-            f"First five frames: smoothing={smoothing:g} m^2/point",
+            f"{len(frames)} consecutive frames: smoothing={smoothing:g} m^2/point",
+            args.reference_id,
         )
         write_csv(trial_dir / "leave_one_frame_out_folds.csv", cv["folds"])
         write_csv(
@@ -807,10 +851,14 @@ def main() -> None:
     }
     selected_dir = args.output_dir / "03_selected_result"
     plot_fit(
-        selected_dir / "five_frames_two_smooth_curves.png",
+        selected_dir / f"{len(frames)}_frames_two_smooth_curves.png",
         frames,
         fits,
-        "KITTI 00 frames 000000-000004: two pose-aligned smooth curves",
+        (
+            f"KITTI 00 frames {frame_ids[0]:06d}-{frame_ids[-1]:06d}: "
+            "two pose-aligned smooth curves"
+        ),
+        args.reference_id,
     )
     export_fit(selected_dir / "curve_data", fits, frames)
     metrics = [
@@ -818,7 +866,9 @@ def main() -> None:
     ]
     write_csv(selected_dir / "fit_metrics.csv", metrics)
     (selected_dir / "curve_model.json").write_text(
-        json.dumps(model_document(fits), ensure_ascii=False, indent=2),
+        json.dumps(
+            model_document(fits, args.reference_id), ensure_ascii=False, indent=2
+        ),
         encoding="utf-8",
     )
     crossing = no_crossing_check(fits)
@@ -859,7 +909,11 @@ def main() -> None:
             inputs[label] = {"path": str(path.resolve()), "sha256": sha256(path)}
     audit = {
         "status": "complete",
-        "scope": "KITTI Odometry Sequence 00 frames 000000-000004 only",
+        "scope": (
+            f"KITTI Odometry Sequence 00 frames {frame_ids[0]:06d}-"
+            f"{frame_ids[-1]:06d}"
+        ),
+        "frame_ids": frame_ids,
         "source_mode": source_mode,
         "inputs": inputs,
         "coordinate_system": {
@@ -902,7 +956,10 @@ def main() -> None:
             "Manual reference points are pseudo-labels, not KITTI lane ground truth.",
             "The fit inherits any wrong upstream left/right lane selection.",
             "Flat-road IPM uses the project assumptions supplied to this run.",
-            "Five mostly straight frames do not validate curved-road performance.",
+            f"These {len(frame_ids)} mostly straight frames do not validate "
+            "curved-road performance.",
+            "Pose continuity alone does not prove that no lane topology change occurs; "
+            "the original and selected-lane images must also be inspected.",
         ],
     }
     (args.output_dir / "00_audit" / "audit.json").write_text(
