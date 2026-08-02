@@ -44,6 +44,7 @@ SIDES = lane_curve.SIDES
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser()
     parser.add_argument("--aligned-json", type=Path, required=True)
+    parser.add_argument("--detected-json", type=Path)
     parser.add_argument("--reference-id", type=int, required=True)
     parser.add_argument("--segment-size", type=int, default=5)
     parser.add_argument("--feature-points-per-segment", type=int, default=8)
@@ -376,6 +377,78 @@ def pose_geometry(record: dict[str, object]) -> dict[str, object]:
     }
 
 
+def selection_continuity(
+    path: Path, expected_frame_ids: list[int]
+) -> tuple[dict[str, object], list[dict[str, object]]]:
+    record = json.loads(path.read_text(encoding="utf-8"))
+    frames = record["detector"]["frames"]
+    frame_ids = [int(frame["frame_id"]) for frame in frames]
+    if frame_ids != expected_frame_ids:
+        raise ValueError(
+            f"Detected-lane frame IDs {frame_ids} do not match {expected_frame_ids}."
+        )
+    rows = []
+    for frame in frames:
+        selected = {item["side"]: item for item in frame["selected"]}
+        left = selected["left"]
+        right = selected["right"]
+        rows.append(
+            {
+                "frame_id": int(frame["frame_id"]),
+                "candidate_count": int(frame["candidate_count"]),
+                "left_lane_index": int(left["lane_index"]),
+                "left_bottom_x_px": float(left["bottom_x_px"]),
+                "right_lane_index": int(right["lane_index"]),
+                "right_bottom_x_px": float(right["bottom_x_px"]),
+                "selected_width_px": float(
+                    right["bottom_x_px"] - left["bottom_x_px"]
+                ),
+                "rejected_candidate_indices": ",".join(
+                    str(index) for index in frame["rejected_candidate_indices"]
+                ),
+            }
+        )
+    left_x = np.asarray([row["left_bottom_x_px"] for row in rows])
+    right_x = np.asarray([row["right_bottom_x_px"] for row in rows])
+    widths = right_x - left_x
+    candidate_counts = [int(row["candidate_count"]) for row in rows]
+    count_histogram = {
+        str(count): candidate_counts.count(count) for count in sorted(set(candidate_counts))
+    }
+    index_pairs = [
+        (int(row["left_lane_index"]), int(row["right_lane_index"])) for row in rows
+    ]
+    pair_histogram = {
+        f"{left},{right}": index_pairs.count((left, right))
+        for left, right in sorted(set(index_pairs))
+    }
+    summary = {
+        "candidate_count_histogram": count_histogram,
+        "frames_with_rejected_candidates": [
+            int(row["frame_id"]) for row in rows if row["rejected_candidate_indices"]
+        ],
+        "selected_index_pair_histogram": pair_histogram,
+        "left_bottom_x_range_px": [float(np.min(left_x)), float(np.max(left_x))],
+        "right_bottom_x_range_px": [float(np.min(right_x)), float(np.max(right_x))],
+        "maximum_adjacent_left_bottom_x_change_px": float(
+            np.max(np.abs(np.diff(left_x)))
+        ),
+        "maximum_adjacent_right_bottom_x_change_px": float(
+            np.max(np.abs(np.diff(right_x)))
+        ),
+        "selected_width_range_px": [float(np.min(widths)), float(np.max(widths))],
+        "selected_width_median_px": float(np.median(widths)),
+        "maximum_adjacent_selected_width_change_px": float(
+            np.max(np.abs(np.diff(widths)))
+        ),
+        "interpretation": (
+            "Checks temporal continuity of the selected outer pair; it does not prove "
+            "that the pair has the desired road/lane semantics."
+        ),
+    }
+    return summary, rows
+
+
 def manual_metrics(
     fits: dict[str, lane_curve.CurveFit],
     manual_frames: list[dict[str, object]],
@@ -476,6 +549,8 @@ def main() -> None:
     if args.manual_json and (not args.calib or not args.poses):
         raise ValueError("Manual evaluation requires --calib and --poses.")
     required = [args.aligned_json]
+    if args.detected_json:
+        required.append(args.detected_json)
     required += [path for path in (args.manual_json, args.calib, args.poses) if path]
     missing = [str(path) for path in required if not path.is_file()]
     if missing:
@@ -605,6 +680,15 @@ def main() -> None:
         )
 
     geometry = pose_geometry(raw_record)
+    selection_summary = selection_rows = None
+    if args.detected_json:
+        selection_summary, selection_rows = selection_continuity(
+            args.detected_json, frame_ids
+        )
+        write_csv(
+            args.output_dir / "00_audit" / "selection_continuity.csv",
+            selection_rows,
+        )
     audit = {
         "status": "complete",
         "scope": f"frames {frame_ids[0]:06d}-{frame_ids[-1]:06d}",
@@ -612,8 +696,15 @@ def main() -> None:
         "input": {
             "aligned_json": str(args.aligned_json.resolve()),
             "aligned_json_sha256": sha256(args.aligned_json),
+            "detected_json": (
+                str(args.detected_json.resolve()) if args.detected_json else None
+            ),
+            "detected_json_sha256": (
+                sha256(args.detected_json) if args.detected_json else None
+            ),
         },
         "pose_geometry": geometry,
+        "selected_lane_temporal_continuity": selection_summary,
         "direct_two_curve_fit": {
             "model": "robust cubic parametric B-spline",
             "selected_smoothing_per_point_m2": selected_smoothing,

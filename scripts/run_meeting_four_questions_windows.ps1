@@ -37,6 +37,8 @@ if ([string]::IsNullOrWhiteSpace($First20OutputRoot)) {
 $First20OutputRoot = (Resolve-Path -LiteralPath $First20OutputRoot).Path
 $First20Aligned = Join-Path $First20OutputRoot `
     "01_from_scratch_pipeline\00_metadata\aligned_lane_points.json"
+$First20Detected = Join-Path $First20OutputRoot `
+    "01_from_scratch_pipeline\00_metadata\detected_lane_points.json"
 
 if ([string]::IsNullOrWhiteSpace($OutputRoot)) {
     $Stamp = Get-Date -Format "yyyyMMdd_HHmmss"
@@ -51,7 +53,7 @@ if (Test-Path -LiteralPath $OutputRoot) {
 }
 
 $ManualJson = Join-Path $RootDir "annotations\kitti00_first5_manual_annotations.json"
-$Required = @($First20Aligned, $Kitti.ImageDir, $Kitti.Calib, $Kitti.Poses, $ManualJson)
+$Required = @($First20Aligned, $First20Detected, $Kitti.ImageDir, $Kitti.Calib, $Kitti.Poses, $ManualJson)
 $Missing = $Required | Where-Object { -not (Test-Path -LiteralPath $_) }
 if ($Missing) {
     throw "Required inputs are missing:`n$($Missing -join [Environment]::NewLine)"
@@ -102,6 +104,7 @@ Invoke-CondaPython -Label "Question 1/3/4: first-20 direct fit, segment compress
     -PythonArgs @(
         "scripts\analyze_lane_curve_hierarchy.py",
         "--aligned-json", $First20Aligned,
+        "--detected-json", $First20Detected,
         "--reference-id", "19",
         "--segment-size", "5",
         "--feature-points-per-segment", "8",
@@ -177,6 +180,7 @@ if (-not $SkipCurvedCandidates) {
                     "--output", (Join-Path $VisualGate "03_selected_two.png")
                 )
             $Aligned = Join-Path $PipelineDir "00_metadata\aligned_lane_points.json"
+            $Detected = Join-Path $PipelineDir "00_metadata\detected_lane_points.json"
             Invoke-CondaPython -Label "Curved candidate ${RangeText}: direct two-curve fit" `
                 -PythonArgs @(
                     "scripts\fit_first5_two_curves.py",
@@ -191,6 +195,7 @@ if (-not $SkipCurvedCandidates) {
                 -PythonArgs @(
                     "scripts\analyze_lane_curve_hierarchy.py",
                     "--aligned-json", $Aligned,
+                    "--detected-json", $Detected,
                     "--reference-id", "$EndFrame",
                     "--segment-size", "5",
                     "--feature-points-per-segment", "8",
