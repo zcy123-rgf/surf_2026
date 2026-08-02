@@ -71,3 +71,11 @@ git pull --ff-only origin agent/windows-ransac-workstation-data
 - [Feng 等，CVPR 2022，Rethinking Efficient Lane Detection via Curve Modeling](https://openaccess.thecvf.com/content/CVPR2022/html/Feng_Rethinking_Efficient_Lane_Detection_via_Curve_Modeling_CVPR_2022_paper.html)：讨论多项式车道表示的困难，并用少量参数的三次 Bézier 曲线表示完整车道形状，支持本项目采用紧凑参数曲线而不是保存所有稠密点。
 - [HDMapNet，ICRA 2022](https://arxiv.org/abs/2107.06307)：以 BEV 中的矢量化地图元素为对象，并区分语义级和实例级评价，支持本项目不再只看栅格重叠。
 - [MapTR，ICLR 2023](https://arxiv.org/abs/2208.14437)：把地图元素建模为点集并处理等价排列，支持使用米制矢量曲线/点集距离检查地图几何，而非只比较渲染像素。
+
+## 曲线路段的实际失败与预扫描修正
+
+工作站首次对 `0095-0114` 和 `1549-1568` 做实时 CLRNet 推理时，两个完整区间都遇到至少一帧仅输出 1 条候选线，因此旧流程在“两条曲线”拟合前如实终止。`torch.load` 的文字是兼容性预警，不是本次失败原因；真正异常是 `Expected at least two CLRNet lanes, received 1`。
+
+现在先运行 `scan_clrnet_lane_counts.py`，逐帧保存原图、全部 CLRNet 候选线、候选数量和底部横坐标。只有每帧至少有 2 条候选线且帧号连续的区间才允许进入后续拟合；区间长度必须是 5 的倍数。多个可用区间之间先选最长区间，长度相同时再依据官方 pose 的累计航向变化、净航向变化和路径长度排序。若连 5 帧都找不到，脚本会写入 `no_valid_run`，不会补造、插值或复制第二条线。
+
+预扫描只能验证“两条曲线算法的最低输入数量条件”，不能证明最外侧两条候选线就是目标左右车道边界。接受弯道实验前仍须查看 `00_visual_identity_gate` 中的原图与全部候选线接触表。

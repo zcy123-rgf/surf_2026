@@ -129,10 +129,12 @@ if (-not $SkipCurvedCandidates) {
         if ($FrameArray.Count -lt 5 -or ($FrameArray.Count % 5) -ne 0) {
             throw "Curved range '$RangeText' must contain at least 5 frames and be divisible by 5."
         }
-        $FrameIds = $FrameArray -join ","
-        $Weights = (($FrameArray | ForEach-Object { "1.0" }) -join ",")
+        $RequestedFrameIds = $FrameArray -join ","
+        $RequestedStartFrame = $StartFrame
+        $RequestedEndFrame = $EndFrame
         $RangeName = "frames_{0:000000}_{1:000000}" -f $StartFrame, $EndFrame
         $CandidateRoot = Join-Path $OutputRoot "02_curved_candidates\$RangeName"
+        $ScanDir = Join-Path $CandidateRoot "00_detection_scan"
         $PipelineDir = Join-Path $CandidateRoot "01_from_scratch_pipeline"
         $CurveDir = Join-Path $CandidateRoot "02_direct_two_curves"
         $AnalysisDir = Join-Path $CandidateRoot "03_model_and_hierarchy_analysis"
@@ -143,7 +145,56 @@ if (-not $SkipCurvedCandidates) {
                     throw "Missing image: $Image"
                 }
             }
-            Invoke-CondaPython -Label "Curved candidate ${RangeText}: CLRNet, metric IPM and pose alignment" `
+            Invoke-CondaPython -Label "Curved candidate ${RangeText}: preflight CLRNet candidate-count scan" `
+                -PythonArgs @(
+                    "scripts\scan_clrnet_lane_counts.py",
+                    "--image-dir", $Kitti.ImageDir,
+                    "--image-pattern", "{frame_id:06d}.png",
+                    "--frame-ids", $RequestedFrameIds,
+                    "--poses", $Kitti.Poses,
+                    "--segment-size", "5",
+                    "--minimum-candidates", "2",
+                    "--device", $Device,
+                    "--output-dir", $ScanDir
+                )
+            $VisualGate = Join-Path $CandidateRoot "00_visual_identity_gate"
+            Invoke-CondaPython -Label "Curved candidate ${RangeText}: scan original contact sheet" `
+                -PythonArgs @(
+                    "scripts\make_image_contact_sheet.py",
+                    "--input-dir", (Join-Path $ScanDir "original_frames"),
+                    "--output", (Join-Path $VisualGate "01_scan_original_frames.png")
+                )
+            Invoke-CondaPython -Label "Curved candidate ${RangeText}: scan all-candidate contact sheet" `
+                -PythonArgs @(
+                    "scripts\make_image_contact_sheet.py",
+                    "--input-dir", (Join-Path $ScanDir "all_candidates"),
+                    "--output", (Join-Path $VisualGate "02_scan_all_candidates.png")
+                )
+
+            $RecommendationPath = Join-Path $ScanDir "recommendation.json"
+            $Recommendation = Get-Content -LiteralPath $RecommendationPath -Raw |
+                ConvertFrom-Json
+            if ($Recommendation.status -ne "selected") {
+                $CandidateStatuses += [PSCustomObject]@{
+                    requested_range = $RangeText
+                    selected_range = $null
+                    status = "skipped_no_valid_two_candidate_run"
+                    output = $CandidateRoot
+                    detection_scan = $RecommendationPath
+                    reason = $Recommendation.reason
+                }
+                Write-Warning "Curved candidate $RangeText has no valid consecutive subrange; no curve was fitted."
+                continue
+            }
+
+            $FrameArray = @($Recommendation.frame_ids | ForEach-Object { [int]$_ })
+            $StartFrame = [int]$Recommendation.selected_start
+            $EndFrame = [int]$Recommendation.selected_end
+            $FrameIds = $FrameArray -join ","
+            $Weights = (($FrameArray | ForEach-Object { "1.0" }) -join ",")
+            $SelectedRange = "$StartFrame-$EndFrame"
+
+            Invoke-CondaPython -Label "Curved candidate ${RangeText}, selected ${SelectedRange}: CLRNet, metric IPM and pose alignment" `
                 -PythonArgs @(
                     "scripts\run_full_point_pipeline.py",
                     "--image-dir", $Kitti.ImageDir,
@@ -160,24 +211,11 @@ if (-not $SkipCurvedCandidates) {
                     "--device", $Device,
                     "--output-dir", $PipelineDir
                 )
-            $VisualGate = Join-Path $CandidateRoot "00_visual_identity_gate"
-            Invoke-CondaPython -Label "Curved candidate ${RangeText}: original contact sheet" `
-                -PythonArgs @(
-                    "scripts\make_image_contact_sheet.py",
-                    "--input-dir", (Join-Path $PipelineDir "01_original_frames"),
-                    "--output", (Join-Path $VisualGate "01_original_frames.png")
-                )
-            Invoke-CondaPython -Label "Curved candidate ${RangeText}: all-candidate contact sheet" `
-                -PythonArgs @(
-                    "scripts\make_image_contact_sheet.py",
-                    "--input-dir", (Join-Path $PipelineDir "02_clrnet_points\all_candidates"),
-                    "--output", (Join-Path $VisualGate "02_all_candidates.png")
-                )
-            Invoke-CondaPython -Label "Curved candidate ${RangeText}: selected-pair contact sheet" `
+            Invoke-CondaPython -Label "Curved candidate ${RangeText}: selected-subrange pair contact sheet" `
                 -PythonArgs @(
                     "scripts\make_image_contact_sheet.py",
                     "--input-dir", (Join-Path $PipelineDir "02_clrnet_points\selected_two"),
-                    "--output", (Join-Path $VisualGate "03_selected_two.png")
+                    "--output", (Join-Path $VisualGate "03_selected_subrange_two.png")
                 )
             $Aligned = Join-Path $PipelineDir "00_metadata\aligned_lane_points.json"
             $Detected = Join-Path $PipelineDir "00_metadata\detected_lane_points.json"
@@ -202,14 +240,17 @@ if (-not $SkipCurvedCandidates) {
                     "--output-dir", $AnalysisDir
                 )
             $CandidateStatuses += [PSCustomObject]@{
-                range = $RangeText
+                requested_range = $RangeText
+                selected_range = $SelectedRange
+                selected_frame_count = $FrameArray.Count
                 status = "complete"
                 output = $CandidateRoot
+                detection_scan = $RecommendationPath
                 validity_gate = "inspect originals, all_candidates and selected_two before claiming a curved lane result"
             }
         } catch {
             $CandidateStatuses += [PSCustomObject]@{
-                range = $RangeText
+                requested_range = $RangeText
                 status = "failed"
                 output = $CandidateRoot
                 error = $_.Exception.Message
@@ -243,6 +284,8 @@ Write-Host "  01_first20_straight_analysis\00_audit\audit.json"
 Write-Host "  01_first20_straight_analysis\03_hierarchical_refusion\direct_vs_refused.png"
 Write-Host "  01_first20_straight_analysis\04_manual_pseudo_gt\direct_curve_metrics.csv"
 Write-Host "For every curved candidate, inspect before using metrics:"
-Write-Host "  01_from_scratch_pipeline\01_original_frames"
-Write-Host "  01_from_scratch_pipeline\02_clrnet_points\all_candidates"
-Write-Host "  01_from_scratch_pipeline\02_clrnet_points\selected_two"
+Write-Host "  00_detection_scan\lane_counts.csv"
+Write-Host "  00_detection_scan\recommendation.json"
+Write-Host "  00_visual_identity_gate\01_scan_original_frames.png"
+Write-Host "  00_visual_identity_gate\02_scan_all_candidates.png"
+Write-Host "  00_visual_identity_gate\03_selected_subrange_two.png (only when selected)"
