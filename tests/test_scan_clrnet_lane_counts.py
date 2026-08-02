@@ -50,6 +50,14 @@ def test_no_five_frame_run_does_not_synthesize_missing_lane():
     assert "No missing lane was synthesized" in result["reason"]
 
 
+def test_metric_bev_gate_splits_run_even_when_candidate_count_is_two():
+    input_rows = rows([2] * 10)
+    input_rows[4]["eligible_for_two_curve_fit"] = False
+    result = SCANNER.select_window(input_rows, make_poses(10), segment_size=5)
+    assert result["status"] == "selected"
+    assert result["frame_ids"] == [5, 6, 7, 8, 9]
+
+
 def test_selects_longest_run_and_trims_to_segment_multiple():
     result = SCANNER.select_window(
         rows([2] * 8 + [1] + [2] * 6), make_poses(15, curved_from=9), segment_size=5

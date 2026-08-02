@@ -22,6 +22,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
 from surf_bev.detectors import CLRNetLaneDetector  # noqa: E402
+from surf_bev.geometry import image_to_ground_ipm  # noqa: E402
 
 
 COLORS_BGR = [
@@ -36,6 +37,26 @@ COLORS_BGR = [
 
 def comma_ints(value: str) -> list[int]:
     return [int(item.strip()) for item in value.split(",") if item.strip()]
+
+
+def parse_range(value: str, option: str) -> tuple[float, float]:
+    parts = [float(item.strip()) for item in value.split(",")]
+    if len(parts) != 2 or not parts[0] < parts[1]:
+        raise ValueError(f"{option} requires two increasing comma-separated values.")
+    return parts[0], parts[1]
+
+
+def load_intrinsic(calib_path: Path) -> np.ndarray:
+    entries: dict[str, np.ndarray] = {}
+    with calib_path.open("r", encoding="utf-8") as stream:
+        for line in stream:
+            if ":" not in line:
+                continue
+            key, values = line.split(":", 1)
+            entries[key.strip()] = np.fromstring(values, sep=" ", dtype=np.float64)
+    if "P2" not in entries or entries["P2"].size != 12:
+        raise ValueError(f"Calibration file has no valid P2 projection: {calib_path}")
+    return entries["P2"].reshape(3, 4)[:, :3]
 
 
 def imread(path: Path) -> np.ndarray:
@@ -81,13 +102,18 @@ def draw_candidates(image: np.ndarray, lanes: list[np.ndarray]) -> np.ndarray:
 def eligible_runs(
     rows: list[dict[str, object]], minimum_candidates: int = 2
 ) -> list[list[int]]:
-    """Return runs of consecutive frame IDs satisfying the candidate gate."""
+    """Return consecutive runs satisfying both candidate and metric gates."""
 
     runs: list[list[int]] = []
     current: list[int] = []
     for row in rows:
         frame_id = int(row["frame_id"])
-        eligible = int(row["candidate_count"]) >= minimum_candidates
+        eligible = bool(
+            row.get(
+                "eligible_for_two_curve_fit",
+                int(row["candidate_count"]) >= minimum_candidates,
+            )
+        )
         if eligible and (not current or frame_id == current[-1] + 1):
             current.append(frame_id)
         elif eligible:
@@ -139,8 +165,9 @@ def select_window(
             "segment_size": segment_size,
             "eligible_runs": runs,
             "reason": (
-                "No consecutive run has enough frames with at least two "
-                "CLRNet candidates. No missing lane was synthesized."
+                "No consecutive run has enough frames satisfying both gates: "
+                "at least two CLRNet candidates and at least the required BEV "
+                "points on each selected side. No missing lane was synthesized."
             ),
         }
 
@@ -167,7 +194,8 @@ def select_window(
         "minimum_candidates_per_frame": minimum_candidates,
         "segment_size": segment_size,
         "selection_rule": (
-            "longest consecutive run whose every frame has >=2 candidates; "
+            "longest consecutive run whose every frame has >=2 candidates "
+            "and enough valid metric BEV points on both selected sides; "
             "ties use total absolute pose heading change, then net heading "
             "change magnitude, then path length"
         ),
@@ -184,10 +212,15 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--image-dir", type=Path, required=True)
     parser.add_argument("--image-pattern", default="{frame_id:06d}.png")
     parser.add_argument("--frame-ids", required=True)
+    parser.add_argument("--calib", type=Path, required=True)
     parser.add_argument("--poses", type=Path, required=True)
     parser.add_argument("--output-dir", type=Path, required=True)
     parser.add_argument("--segment-size", type=int, default=5)
     parser.add_argument("--minimum-candidates", type=int, default=2)
+    parser.add_argument("--minimum-bev-points-per-side", type=int, default=4)
+    parser.add_argument("--camera-height", type=float, default=1.65)
+    parser.add_argument("--pitch-deg", type=float, default=0.0)
+    parser.add_argument("--local-z-range", default="3,50")
     parser.add_argument("--clrnet-root", type=Path, default=ROOT / "CLRNet")
     parser.add_argument(
         "--clrnet-config", default="configs/clrnet/clr_resnet18_culane.py"
@@ -200,10 +233,18 @@ def parse_args() -> argparse.Namespace:
 def main() -> None:
     args = parse_args()
     frame_ids = comma_ints(args.frame_ids)
+    local_z_range = parse_range(args.local_z_range, "--local-z-range")
     if not frame_ids or len(set(frame_ids)) != len(frame_ids):
         raise ValueError("Frame IDs must be non-empty and unique.")
-    if args.segment_size < 2 or args.minimum_candidates < 2:
-        raise ValueError("segment-size and minimum-candidates must both be >= 2.")
+    if (
+        args.segment_size < 2
+        or args.minimum_candidates < 2
+        or args.minimum_bev_points_per_side < 2
+    ):
+        raise ValueError(
+            "segment-size, minimum-candidates and minimum-bev-points-per-side "
+            "must all be >= 2."
+        )
     if args.output_dir.exists() and any(args.output_dir.iterdir()):
         raise ValueError(f"Output directory must be new or empty: {args.output_dir}")
     args.output_dir.mkdir(parents=True, exist_ok=True)
@@ -212,7 +253,11 @@ def main() -> None:
         args.image_dir / args.image_pattern.format(frame_id=frame_id)
         for frame_id in frame_ids
     ]
-    missing = [str(path) for path in [*image_paths, args.poses] if not path.is_file()]
+    missing = [
+        str(path)
+        for path in [*image_paths, args.calib, args.poses]
+        if not path.is_file()
+    ]
     if missing:
         raise FileNotFoundError("Missing inputs: " + ", ".join(missing))
 
@@ -220,6 +265,7 @@ def main() -> None:
     if max(frame_ids) >= len(poses):
         raise ValueError("Pose file does not cover every requested frame ID.")
 
+    intrinsic_k = load_intrinsic(args.calib)
     detector = CLRNetLaneDetector(
         clrnet_root=str(args.clrnet_root.resolve()),
         config=args.clrnet_config,
@@ -232,6 +278,26 @@ def main() -> None:
     for frame_id, image_path in zip(frame_ids, image_paths):
         image = imread(image_path)
         lanes = detector.detect(image)["lanes"]
+        selected_lanes: list[np.ndarray] = []
+        if len(lanes) >= args.minimum_candidates:
+            ordered = sorted(lanes, key=bottom_x)
+            selected_lanes = [ordered[0], ordered[-1]]
+        projected_counts = [
+            len(
+                image_to_ground_ipm(
+                    lane,
+                    intrinsic_k,
+                    camera_height=args.camera_height,
+                    pitch_deg=args.pitch_deg,
+                    z_range=local_z_range,
+                )
+            )
+            for lane in selected_lanes
+        ]
+        metric_gate = (
+            len(projected_counts) == 2
+            and min(projected_counts) >= args.minimum_bev_points_per_side
+        )
         shutil.copy2(
             image_path,
             args.output_dir / "original_frames" / f"frame_{frame_id:06d}.png",
@@ -248,10 +314,19 @@ def main() -> None:
                 "candidate_bottom_x_px": ";".join(
                     f"{bottom_x(lane):.6f}" for lane in lanes
                 ),
-                "eligible_for_two_curve_fit": len(lanes) >= args.minimum_candidates,
+                "selected_projected_point_counts": ";".join(
+                    str(count) for count in projected_counts
+                ),
+                "candidate_count_gate": len(lanes) >= args.minimum_candidates,
+                "metric_bev_point_gate": metric_gate,
+                "eligible_for_two_curve_fit": metric_gate,
             }
         )
-        print(f"frame {frame_id:06d}: {len(lanes)} CLRNet candidate(s)", flush=True)
+        print(
+            f"frame {frame_id:06d}: {len(lanes)} candidate(s), "
+            f"selected BEV counts={projected_counts}, eligible={metric_gate}",
+            flush=True,
+        )
 
     csv_path = args.output_dir / "lane_counts.csv"
     with csv_path.open("w", newline="", encoding="utf-8-sig") as stream:
@@ -272,10 +347,14 @@ def main() -> None:
         "frames_with_at_least_two_candidates": sum(
             int(row["candidate_count"]) >= 2 for row in rows
         ),
+        "frames_passing_metric_bev_gate": sum(
+            bool(row["metric_bev_point_gate"]) for row in rows
+        ),
         "counts": rows,
         "recommendation": recommendation,
         "warnings": [
             "Candidate count does not prove left/right lane-boundary identity.",
+            "A selected image lane can still have too few valid points after metric IPM.",
             "Inspect original_frames and all_candidates before accepting a segment.",
             "No missing second lane is interpolated or synthesized by this scanner.",
         ],

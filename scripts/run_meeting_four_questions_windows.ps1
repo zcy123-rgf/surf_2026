@@ -151,9 +151,12 @@ if (-not $SkipCurvedCandidates) {
                     "--image-dir", $Kitti.ImageDir,
                     "--image-pattern", "{frame_id:06d}.png",
                     "--frame-ids", $RequestedFrameIds,
+                    "--calib", $Kitti.Calib,
                     "--poses", $Kitti.Poses,
                     "--segment-size", "5",
                     "--minimum-candidates", "2",
+                    "--minimum-bev-points-per-side", "4",
+                    "--local-z-range=3,50",
                     "--device", $Device,
                     "--output-dir", $ScanDir
                 )
