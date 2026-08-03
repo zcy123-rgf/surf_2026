@@ -20,6 +20,9 @@ CLRNet/demo_image.py
 outputs/
 results/
 workstation_outputs/
+clean_outputs/
+clean_workstation_release/
+clean_workstation_release_smoke/
 generated_runs/
 input_data/
 denoise_experiments/
