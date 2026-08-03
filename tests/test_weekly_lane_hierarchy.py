@@ -80,6 +80,7 @@ def test_windows_wrapper_uses_new_output_and_registered_design() -> None:
     assert "hierarchy_overlap_selection_*" in text
     assert "selection_status -ne \"selected\"" in text
     assert "meeting_result_bundle.zip" in text
+    assert "manual_annotation_package = $AnnotationZip" in text
 
 
 def test_full_synthetic_ten_window_run(tmp_path, monkeypatch) -> None:

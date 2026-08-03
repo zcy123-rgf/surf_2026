@@ -84,6 +84,10 @@ $SelectionJson = [string]$SelectionStatus.selection_json
 if (-not (Test-Path -LiteralPath $SelectionJson -PathType Leaf)) {
     throw "Selection JSON is missing: $SelectionJson"
 }
+$AnnotationZip = [string]$SelectionStatus.annotation_zip
+if (-not (Test-Path -LiteralPath $AnnotationZip -PathType Leaf)) {
+    throw "Manual annotation package is missing: $AnnotationZip"
+}
 
 $Stamp = Get-Date -Format "yyyyMMdd_HHmmss"
 $OutputRoot = Join-Path $RootDir "workstation_outputs\weekly_lane_hierarchy_$Stamp"
@@ -128,6 +132,7 @@ Compress-Archive -LiteralPath $BundleItems -DestinationPath $Bundle -Compression
     experiment_status = $Status
     meeting_summary = (Join-Path $OutputRoot "MEETING_SUMMARY.md")
     result_bundle = $Bundle
+    manual_annotation_package = $AnnotationZip
 } | ConvertTo-Json -Depth 8 | Set-Content `
     -LiteralPath (Join-Path $OutputRoot "RUN_STATUS.json") -Encoding UTF8
 
@@ -140,3 +145,4 @@ Write-Host "Feature points per window per side: $($Status.selected_feature_point
 Write-Host "Manual evaluation: $($Status.manual_evaluation_status)"
 Write-Host "Meeting summary: $(Join-Path $OutputRoot 'MEETING_SUMMARY.md')"
 Write-Host "Upload this small bundle for PPT and speech drafting: $Bundle"
+Write-Host "Upload this image package to finish question 4: $AnnotationZip"
