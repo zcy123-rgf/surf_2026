@@ -33,6 +33,7 @@ def test_candidate_spans_score_ten_fixed_fifteen_frame_blocks(tmp_path):
         poses,
         block_size=15,
         block_count=10,
+        block_stride=15,
         minimum_valid=5,
         scan_json=tmp_path / "scan.json",
     )
@@ -43,3 +44,31 @@ def test_candidate_spans_score_ten_fixed_fifteen_frame_blocks(tmp_path):
     assert first["block_valid_counts"] == [10] * 10
     assert first["minimum_valid_frames_in_a_block"] == 10
     assert first["all_blocks_meet_minimum"] is True
+
+
+def test_overlapping_ten_by_fifteen_windows_cover_105_unique_frames(tmp_path):
+    rows = [
+        {
+            "frame_id": frame_id,
+            "candidate_count": 2,
+            "eligible_for_two_curve_fit": True,
+        }
+        for frame_id in range(170)
+    ]
+    poses = np.zeros((170, 3, 4), dtype=np.float64)
+    poses[:, 0, 0] = 1.0
+    poses[:, 1, 1] = 1.0
+    poses[:, 2, 2] = 1.0
+    result = SELECTOR.candidate_spans(
+        rows,
+        poses,
+        block_size=15,
+        block_count=10,
+        block_stride=10,
+        minimum_valid=5,
+        scan_json=tmp_path / "scan.json",
+    )
+    assert len(result) == 66
+    assert result[0]["start_frame"] == 0
+    assert result[0]["end_frame"] == 104
+    assert result[0]["block_valid_counts"] == [15] * 10

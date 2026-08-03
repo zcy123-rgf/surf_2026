@@ -1,4 +1,4 @@
-"""Choose a continuous 150-frame span for ten 15-frame fusion blocks."""
+"""Choose a continuous span for ten fixed-size lane-fusion windows."""
 
 from __future__ import annotations
 
@@ -37,6 +37,12 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--output-dir", type=Path, required=True)
     parser.add_argument("--block-size", type=int, default=15)
     parser.add_argument("--block-count", type=int, default=10)
+    parser.add_argument(
+        "--block-stride",
+        type=int,
+        default=None,
+        help="Frame step between block starts; defaults to non-overlapping block-size.",
+    )
     parser.add_argument("--minimum-valid-frames-per-block", type=int, default=5)
     return parser.parse_args()
 
@@ -56,12 +62,13 @@ def candidate_spans(
     poses: np.ndarray,
     block_size: int,
     block_count: int,
+    block_stride: int,
     minimum_valid: int,
     scan_json: Path,
 ) -> list[dict[str, object]]:
     by_id = {int(row["frame_id"]): row for row in rows}
     ordered_ids = sorted(by_id)
-    total_frames = block_size * block_count
+    total_frames = block_size + (block_count - 1) * block_stride
     if not ordered_ids:
         return []
     output = []
@@ -71,7 +78,7 @@ def candidate_spans(
             continue
         block_counts = []
         for block_index in range(block_count):
-            block_start = start + block_index * block_size
+            block_start = start + block_index * block_stride
             block_ids = range(block_start, block_start + block_size)
             block_counts.append(
                 sum(
@@ -102,6 +109,9 @@ def main() -> None:
     args = parse_args()
     if args.block_size < 5 or args.block_count < 2:
         raise ValueError("block-size must be >=5 and block-count must be >=2.")
+    block_stride = args.block_stride or args.block_size
+    if not 1 <= block_stride <= args.block_size:
+        raise ValueError("block-stride must be between 1 and block-size.")
     if not 1 <= args.minimum_valid_frames_per_block <= args.block_size:
         raise ValueError("minimum-valid-frames-per-block is outside the block size.")
     if args.output_dir.exists() and any(args.output_dir.iterdir()):
@@ -123,6 +133,7 @@ def main() -> None:
                 poses,
                 args.block_size,
                 args.block_count,
+                block_stride,
                 args.minimum_valid_frames_per_block,
                 scan_json,
             )
@@ -145,7 +156,7 @@ def main() -> None:
     block_rows = []
     manual_frame_ids = []
     for block_index, valid_count in enumerate(selected["block_valid_counts"]):
-        block_start = start + block_index * args.block_size
+        block_start = start + block_index * block_stride
         block_end = block_start + args.block_size - 1
         manual_ids = [block_start, block_start + args.block_size // 2, block_end]
         manual_frame_ids.extend(manual_ids)
@@ -197,12 +208,14 @@ def main() -> None:
             else "selected_but_below_requested_coverage"
         ),
         "claim_scope": (
-            "frame-availability audit for ten fixed non-overlapping 15-frame "
-            "blocks; not a lane-identity or accuracy result"
+            "frame-availability audit for ten fixed-size 15-frame windows; "
+            "not a lane-identity or accuracy result"
         ),
         "block_size": args.block_size,
         "block_count": args.block_count,
-        "total_frames": args.block_size * args.block_count,
+        "block_stride": block_stride,
+        "overlap_frames_between_adjacent_blocks": args.block_size - block_stride,
+        "total_unique_frames": args.block_size + (args.block_count - 1) * block_stride,
         "minimum_valid_frames_per_block_required": args.minimum_valid_frames_per_block,
         "selected": selected,
         "blocks": block_rows,
