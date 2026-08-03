@@ -400,13 +400,16 @@ def main() -> None:
     (args.output_dir / "all_candidates").mkdir(parents=True, exist_ok=True)
     rows: list[dict[str, object]] = []
     ground_lanes: dict[int, list[np.ndarray]] = {}
+    point_records: list[dict[str, object]] = []
     for frame_id, image_path in zip(frame_ids, image_paths):
         image = imread(image_path)
         lanes = detector.detect(image)["lanes"]
         selected_lanes: list[np.ndarray] = []
+        selected_indices: list[int] = []
         if len(lanes) >= args.minimum_candidates:
-            ordered = sorted(lanes, key=bottom_x)
-            selected_lanes = [ordered[0], ordered[-1]]
+            ordered = sorted(enumerate(lanes), key=lambda item: bottom_x(item[1]))
+            selected_indices = [int(ordered[0][0]), int(ordered[-1][0])]
+            selected_lanes = [ordered[0][1], ordered[-1][1]]
         projected_counts = [
             len(
                 image_to_ground_ipm(
@@ -433,6 +436,18 @@ def main() -> None:
             )
             for lane in selected_lanes
         ]
+        point_records.append(
+            {
+                "frame_id": frame_id,
+                "candidate_count": len(lanes),
+                "selected_candidate_indices": selected_indices,
+                "selected_lanes_image_xy_px": [lane.tolist() for lane in selected_lanes],
+                "selected_lanes_local_ground_xz_m": [
+                    lane.tolist() for lane in ground_lanes[frame_id]
+                ],
+                "eligible_for_two_curve_fit": metric_gate,
+            }
+        )
         shutil.copy2(
             image_path,
             args.output_dir / "original_frames" / f"frame_{frame_id:06d}.png",
@@ -505,6 +520,23 @@ def main() -> None:
     )
     (args.output_dir / "recommendation.json").write_text(
         json.dumps(recommendation, indent=2, ensure_ascii=False), encoding="utf-8"
+    )
+    point_document = {
+        "status": "complete",
+        "coordinate_system": (
+            "per-frame image-camera ground X/Z in metres; X right, Z forward"
+        ),
+        "camera_height_m": args.camera_height,
+        "pitch_deg": args.pitch_deg,
+        "local_z_range_m": list(local_z_range),
+        "selection": "outermost candidates ordered by bottom image x",
+        "frames": point_records,
+        "warning": (
+            "Selected outer candidates are not guaranteed to be ego-lane boundaries."
+        ),
+    }
+    (args.output_dir / "selected_lane_points.json").write_text(
+        json.dumps(point_document, indent=2, ensure_ascii=False), encoding="utf-8"
     )
     print(json.dumps(recommendation, ensure_ascii=False), flush=True)
 
