@@ -1,0 +1,40 @@
+{
+  "dataset": "KITTI Odometry Sequence 00",
+  "frames": [0, 1, 2, 3, 4],
+  "image_size_wh_px": [1241, 376],
+  "annotation_type": "manual apparent left/right driving-boundary pseudo-labels",
+  "annotation_note": "The road has no continuous painted lane markings. Points follow visually apparent driving boundaries; occluded segments are manually interpolated and are not ground truth.",
+  "coordinate_convention": "image pixel [x, y] from top-left",
+  "frames_xy": [
+    {
+      "frame_id": 0,
+      "left": [[151, 374], [205, 350], [267, 325], [329, 300], [388, 275], [442, 250], [482, 230], [512, 215], [535, 203], [550, 194], [560, 188]],
+      "right": [[875, 374], [824, 350], [771, 325], [720, 300], [675, 275], [638, 250], [613, 230], [598, 215], [589, 203], [584, 194], [580, 188]],
+      "occlusion_note": "Right boundary is partly hidden by the parked vehicle; the near-field segment is interpolated."
+    },
+    {
+      "frame_id": 1,
+      "left": [[154, 374], [208, 350], [270, 325], [332, 300], [391, 275], [445, 250], [485, 230], [515, 215], [538, 203], [553, 194], [562, 188]],
+      "right": [[864, 374], [814, 350], [762, 325], [712, 300], [668, 275], [632, 250], [607, 230], [593, 215], [585, 203], [580, 194], [578, 188]],
+      "occlusion_note": "Right boundary is partly hidden by the parked vehicle; the near-field segment is interpolated."
+    },
+    {
+      "frame_id": 2,
+      "left": [[158, 374], [212, 350], [275, 325], [338, 300], [397, 275], [451, 250], [491, 230], [521, 215], [544, 203], [558, 194], [567, 188]],
+      "right": [[855, 374], [806, 350], [754, 325], [705, 300], [661, 275], [626, 250], [601, 230], [587, 215], [579, 203], [575, 194], [573, 188]],
+      "occlusion_note": "Right boundary is partly hidden by the parked vehicle; the near-field segment is interpolated."
+    },
+    {
+      "frame_id": 3,
+      "left": [[160, 374], [215, 350], [279, 325], [342, 300], [402, 275], [456, 250], [496, 230], [526, 215], [549, 203], [563, 194], [572, 188]],
+      "right": [[848, 374], [799, 350], [747, 325], [698, 300], [655, 275], [620, 250], [595, 230], [581, 215], [573, 203], [569, 194], [567, 188]],
+      "occlusion_note": "Right boundary is partly hidden by the parked vehicle; the near-field segment is interpolated."
+    },
+    {
+      "frame_id": 4,
+      "left": [[164, 374], [220, 350], [284, 325], [348, 300], [408, 275], [462, 250], [502, 230], [532, 215], [555, 203], [569, 194], [578, 188]],
+      "right": [[842, 374], [793, 350], [741, 325], [692, 300], [649, 275], [614, 250], [589, 230], [575, 215], [567, 203], [563, 194], [561, 188]],
+      "occlusion_note": "Right boundary is partly hidden by the parked vehicle; the near-field segment is interpolated."
+    }
+  ]
+}

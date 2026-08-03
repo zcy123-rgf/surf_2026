@@ -2,6 +2,7 @@
 .idea/
 .venv/
 **/.venv/
+.runtime/
 __pycache__/
 *.pyc
 .ipynb_checkpoints/
@@ -17,6 +18,14 @@ CLRNet/demo_image.py
 
 # Generated outputs.
 outputs/
+results/
+workstation_outputs/
+generated_runs/
+input_data/
+denoise_experiments/
+meeting_materials_*/
+official_kitti_pose_audit/
+official_data_*.zip
 *.png
 *.jpg
 !data/*.png

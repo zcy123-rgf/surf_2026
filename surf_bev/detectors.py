@@ -5,6 +5,22 @@ import cv2
 import numpy as np
 
 
+def _load_python_config_without_temp(Config, config_path):
+    """Load a standalone CLRNet Python config without creating temp .py files."""
+    with open(config_path, "r", encoding="utf-8") as stream:
+        config_text = stream.read()
+    namespace = {"__file__": config_path, "__name__": "clrnet_runtime_config"}
+    exec(compile(config_text, config_path, "exec"), namespace)
+    config_dict = {
+        name: value for name, value in namespace.items() if not name.startswith("__")
+    }
+    if "_base_" in config_dict:
+        raise RuntimeError(
+            "The no-temp Windows config loader only supports standalone CLRNet configs."
+        )
+    return Config(config_dict, cfg_text=config_text, filename=config_path)
+
+
 def _order_polyline(points):
     points = np.asarray(points)
     if points.size == 0:
@@ -94,7 +110,13 @@ class CLRNetLaneDetector:
         config_path = config if os.path.isabs(config) else os.path.join(self.clrnet_root, config)
         checkpoint_path = checkpoint if os.path.isabs(checkpoint) else os.path.join(self.clrnet_root, checkpoint)
 
-        self.cfg = Config.fromfile(config_path)
+        try:
+            self.cfg = Config.fromfile(config_path)
+        except PermissionError:
+            # Some managed Windows workstations forbid creating temporary .py
+            # files. The bundled CLRNet config is standalone, so execute the
+            # existing repository file directly instead of copying it to TEMP.
+            self.cfg = _load_python_config_without_temp(Config, config_path)
         self.base_ori_img_h = self.cfg.ori_img_h
         self.base_cut_height = self.cfg.cut_height
         self.cfg.gpus = 1
