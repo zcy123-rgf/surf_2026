@@ -18,6 +18,7 @@ if (Test-Path -LiteralPath $Destination) {
 
 $Files = @(
     ".gitignore",
+    "README_PYCHARM_WORKSTATION_ZH.md",
     "requirements.txt",
     "requirements-windows.txt",
     "run_demo.py"
@@ -25,6 +26,7 @@ $Files = @(
 $Directories = @(
     "annotations",
     "data",
+    "pycharm_entrypoints",
     "surf_bev",
     "workstation_release"
 )
