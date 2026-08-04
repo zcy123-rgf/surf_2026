@@ -2,6 +2,8 @@
 
 本指南用于在 Windows 工作站上从代码重新生成结果。它只说明已经实际验证过的流程。
 
+当前统一运行方式：在 PyCharm 中直接运行 `pycharm_entrypoints` 下的 `00`—`03` 四个 Python 文件。PyCharm 会自动为当前文件建立运行配置，无需继续使用以前手工填写参数的四个配置，也无需使用 `rundemo`。
+
 ## 1. 打开正确的 PyCharm 项目
 
 在 PyCharm 中选择 `File -> Open`，打开：
@@ -10,11 +12,11 @@
 F:\2026_surf\clean_workstation_release_20260804_004638
 ```
 
-下文用 `<PROJECT_ROOT>` 表示这个目录。复制参数时必须把 `<PROJECT_ROOT>` 替换成实际绝对路径，PyCharm 不会自动展开这个占位符。
+下文用 `<PROJECT_ROOT>` 表示这个目录。
 
 ## 2. 选择解释器
 
-工作站已配置好 Conda 环境 `surf2026-win`，组员只需要在当前 PyCharm 项目中选择它，不需要重新创建环境或安装依赖。
+工作站已配置好 Conda 环境 `surf2026-win`。组员打开项目后先查看 PyCharm 右下角：如果已经显示 `Python 3.10 (surf2026-win)`，可以直接运行；如果显示其他解释器，就在当前项目中选择一次 `surf2026-win`。
 
 进入 `File -> Settings -> Project -> Python Interpreter`，在解释器列表中选择：
 
@@ -22,7 +24,7 @@ F:\2026_surf\clean_workstation_release_20260804_004638
 C:\Users\IR713\anaconda3\envs\surf2026-win\python.exe
 ```
 
-该解释器已包含本项目验证过的 Python 3.10、PyTorch、CUDA、OpenCV、SciPy 和 Matplotlib 环境。PyCharm 会按项目和用户记录解释器选择，因此第一次打开该项目时需要确认一次。
+该解释器已包含本项目验证过的 Python 3.10、PyTorch、CUDA、OpenCV、SciPy 和 Matplotlib 环境。组员远程使用同一台工作站、同一 Windows 账号和同一项目目录时，通常会直接继承现有选择，只需核对右下角显示。
 
 只有当列表中没有 `surf2026-win` 时，才选择 `Add Interpreter -> Add Local Interpreter -> Conda Environment -> 使用现有环境`，并指定上述 `python.exe`。
 
@@ -44,7 +46,15 @@ C:\Users\IR713\anaconda3\envs\surf2026-win\python.exe
 
 `02` 和 `03` 是并列实验：`03` 不依赖 `02` 的结果。
 
-组员在 PyCharm 左侧展开 `pycharm_entrypoints`，打开对应 Python 文件，然后右键选择 `Run`。这些入口会在同一 Python 进程中调用现有核心代码，因此可以用 `Debug` 运行，并在 `scripts` 或 `surf_bev` 中设置断点。
+组员在 PyCharm 左侧展开 `pycharm_entrypoints`，按下面的方法运行：
+
+1. 双击打开对应 Python 文件；
+2. 在编辑区内右键，选择 `Run '文件名'`；
+3. 第一次运行后，PyCharm 会自动生成与该文件同名的运行配置，并显示在右上角；
+4. 以后可以继续右键运行，也可以在右上角选择这个同名配置后点击绿色三角；
+5. 需要查看内部过程时，在 `scripts` 或 `surf_bev` 中设置断点，再选择 `Debug '文件名'`。
+
+这些入口会在同一 Python 进程中调用现有核心代码，因此断点可以进入真实算法，而不是只看到一个外部命令。
 
 输入路径统一写在 `pycharm_entrypoints/common.py`：
 
@@ -151,13 +161,26 @@ pycharm_outputs\LATEST_PIPELINE.json
 
 模型比较指标是对 CLRNet/IPM 派生点的留出帧内部一致性，不是对官方车道线真值的准确率。
 
-## 4. PyCharm 配置与自动输出
+## 4. PyCharm 运行配置怎么处理
 
-当前工作站上已创建的 `00_check_windows_env`、`01_full_point_pipeline`、`02_optimized_ransac` 和 `03_polynomial_bspline` 配置可以继续使用。组员远程进入同一 Windows 账号、打开同一项目时，通常可以直接看到它们。
+组内统一使用右键运行 `pycharm_entrypoints` 后由 PyCharm 自动生成的四个同名配置：
 
-新增的 `pycharm_entrypoints` 是组内推荐入口：它们自动生成带微秒时间戳的新输出目录，因此每次可直接重跑，不需要手工改 `--output-dir`。
+- `00_check_environment`：验证环境和 CLRNet；
+- `01_generate_pose_aligned_points`：生成检测点、IPM 点和 pose 对齐点；
+- `02_run_optimized_ransac`：运行当前保留的改进 RANSAC；
+- `03_compare_curve_models`：比较多项式和 B 样条。
 
-如果为了单独调试而直接运行 `scripts` 中的核心 CLI，仍需提供完整参数，并为 `--output-dir` 指定新目录。
+以前的 `00_check_windows_env`、`01_full_point_pipeline`、`02_optimized_ransac`、`03_polynomial_bspline` 和 `rundemo` 属于此前手工参数或样例运行记录。保留它们不会改变代码和结果；为了让组员只看到当前统一入口，可以这样整理：
+
+1. 打开 `Run -> Edit Configurations`；
+2. 在左侧依次选中上述旧配置；
+3. 点击左上角减号 `-`；
+4. 点击 `Apply -> OK`；
+5. 回到 `pycharm_entrypoints`，依次右键运行 `00`—`03`，PyCharm 会自动建立当前四个配置。
+
+删除运行配置只会清理 PyCharm 的启动记录，不会删除 Python 文件、CLRNet、数据或实验结果。
+
+四个新入口会自动生成带微秒时间戳的新输出目录，因此每次可直接重跑，不需要手工改 `--output-dir`。如果为了单独调试而直接运行 `scripts` 中的核心 CLI，才需要提供完整参数，并为 `--output-dir` 指定新目录。
 
 ## 5. 目录与代码职责
 
@@ -275,7 +298,7 @@ Working directory 必须是 `<PROJECT_ROOT>`。`check_windows_env.py` 会使用 
 ## 8. 最短复现清单
 
 1. 打开 `<PROJECT_ROOT>`；
-2. 选择 `surf2026-win`；
+2. 核对右下角为 `Python 3.10 (surf2026-win)`；
 3. 运行 `pycharm_entrypoints/00_check_environment.py`；
 4. 运行 `pycharm_entrypoints/01_generate_pose_aligned_points.py`；
 5. 分别运行 `pycharm_entrypoints/02_run_optimized_ransac.py` 和 `03_compare_curve_models.py`；
