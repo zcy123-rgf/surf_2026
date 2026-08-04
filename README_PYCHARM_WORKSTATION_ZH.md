@@ -161,7 +161,197 @@ pycharm_outputs\LATEST_PIPELINE.json
 
 模型比较指标是对 CLRNet/IPM 派生点的留出帧内部一致性，不是对官方车道线真值的准确率。
 
-## 4. PyCharm 运行配置怎么处理
+## 4. 四个入口与主体代码的关系
+
+### 4.1 先理解三层代码结构
+
+`pycharm_entrypoints` 下的四个文件不是算法主体，而是便于组员在 PyCharm 中直接运行的薄入口。完整调用关系是：
+
+```text
+pycharm_entrypoints/*.py
+    负责：工作站路径、固定参数、运行顺序、自动新建输出目录
+                    |
+                    v
+scripts/*.py
+    负责：读取输入、依次组织各模块、评价、绘图、写 JSON/CSV
+                    |
+                    v
+surf_bev/*.py 和 CLRNet/clrnet/*
+    负责：网络推理、IPM、pose 变换、RANSAC、曲线拟合和点导出等核心实现
+```
+
+入口通过 `pycharm_entrypoints/common.py` 中的 `run_main()` 在同一个 Python 进程里调用 `scripts` 的 `main()`。所以在 PyCharm 中使用 `Debug` 时，可以从入口逐步进入真正的主体代码，不是启动一个看不见内部过程的外部程序。
+
+`common.py` 还负责：
+
+- 确定项目、KITTI、标定、pose 和 CLRNet 路径；
+- `new_output()` 为每次运行生成新的时间戳目录；
+- `record_latest_pipeline()` 记录最近一次有效的 01 输出；
+- `latest_pipeline_files()` 为 02/03 找到有效的上游点数据；
+- `require_file()` 和 `require_directory()` 在运行前检查输入。
+
+### 4.2 阶段 00：环境和 CLRNet 实际推理检查
+
+调用链：
+
+```text
+pycharm_entrypoints/00_check_environment.py
+  -> scripts/check_windows_env.py : main()
+  -> surf_bev/detectors.py : CLRNetLaneDetector
+  -> CLRNet/clrnet/models/registry.py : build_net()
+  -> CLRNet 网络前向推理
+  -> CLRNet/clrnet/models/heads/clr_head.py : get_lanes()
+  -> surf_bev/detectors.py : _prediction_to_polyline()
+```
+
+各部分功能：
+
+- `00_check_environment.py`：只传入 `--device cuda --run-clrnet`；
+- `check_windows_env.py`：检查 Python、PyTorch、torchvision、CUDA、GPU、项目内 CLRNet 和权重，并读取一张样例图；
+- `CLRNetLaneDetector.__init__()`：读取 CLRNet 配置，建立网络，加载 `weights/culane_r18.pth`，切换到 `eval()`；
+- `CLRNetLaneDetector.detect()`：预处理图像，在 `torch.no_grad()` 中执行推理；
+- `CLRHead.get_lanes()`：对车道/非车道分类分数做 softmax，按置信度阈值筛选，再做 NMS，得到保留的车道候选参数；
+- `_prediction_to_polyline()`：将每个候选中的有效横坐标、起点和长度解码为原图像坐标系中的有序二维点 `(u,v)`。
+
+查看或修改位置：
+
+- 环境检查内容：`scripts/check_windows_env.py`；
+- CLRNet 与本项目的接口、图像预处理和二维点解码：`surf_bev/detectors.py`；
+- CLRNet 网络结构：`CLRNet/clrnet/models/`；
+- 置信度、NMS 和候选解码：`CLRNet/clrnet/models/heads/clr_head.py`；
+- 模型配置：`CLRNet/configs/clrnet/clr_resnet18_culane.py`；
+- 权重：`CLRNet/weights/culane_r18.pth`。
+
+阶段 00 只验证模型能否正确加载并完成一次推理，不生成正式的五帧实验结果。
+
+### 4.3 阶段 01：原图到 pose 对齐米制点
+
+调用链：
+
+```text
+pycharm_entrypoints/01_generate_pose_aligned_points.py
+  -> scripts/run_full_point_pipeline.py : main()
+     -> surf_bev/detectors.py : CLRNetLaneDetector.detect()
+     -> run_full_point_pipeline.py : select_outer_two()
+     -> surf_bev/geometry.py : image_to_ground_ipm()
+     -> surf_bev/geometry.py : transform_lane_points_by_pose()
+     -> run_full_point_pipeline.py : weighted_raster_fusion()
+     -> surf_bev/point_export.py : 点坐标和每点保留/拒绝决定导出
+```
+
+实际处理步骤：
+
+1. 入口固定读取 KITTI Odometry Sequence 00 的 `000000`—`000004` 五帧、`calib.txt` 和 `poses/00.txt`；
+2. `CLRNetLaneDetector.detect()` 对每帧输出若干候选，每个候选是原图像像素坐标中的有序二维点；
+3. `select_outer_two()` 按候选靠近图像底部位置的横坐标排序，暂时选择最左和最右候选，并记录被排除候选；这是当前项目的候选选择规则，不等于 CLRNet 原生输出了“本车道左右边界”语义；
+4. `image_to_ground_ipm()` 使用内参矩阵 `K`、相机高、俯仰角和平坦路面假设，让每个图像点的相机射线与地面相交，得到当前帧地面坐标 `(X,Z)`，单位为米；
+5. `transform_lane_points_by_pose()` 使用
+   `T_ref_from_src = inv(T_world_ref) @ T_world_src`，把每帧点变换到参考图像相机坐标系；当前入口的参考帧是第 4 帧；
+6. `weighted_raster_fusion()` 只在生成显示图时把米制点栅格化并使用 `0.2,0.4,0.6,0.8,1.0` 权重；这些权重不参与 pose 坐标变换；
+7. `point_export.py` 保留共同的原始米制点顺序，并导出不同诊断方法对每个点的保留/拒绝决定；
+8. 最后写出输入哈希、标定、pose、检测候选、二维点、米制点、图像和运行状态。
+
+主体文件职责：
+
+- `scripts/run_full_point_pipeline.py`：完整流程编排、左右候选选择、范围过滤、栅格显示、诊断方法和文件输出；
+- `surf_bev/detectors.py`：CLRNet 模型适配与图像二维点输出；
+- `surf_bev/geometry.py`：KITTI 标定读取、点式 IPM、相机/地面坐标转换和 pose 对齐；
+- `surf_bev/point_export.py`：为每个源点建立可追溯编号，并导出 JSON/CSV；
+- `surf_bev/temporal_denoise.py`：01 中保留的时序候选诊断，不是当前默认 RANSAC；
+- `surf_bev/RANSAC.py` 和 `run_full_point_pipeline.py` 中的旧直线 RANSAC：历史诊断基线，不是阶段 02 的当前实现。
+
+阶段 01 最重要的两个机器可读输出：
+
+- `detected_lane_points.json`：原图像坐标中的 CLRNet 候选和已选两条候选；
+- `aligned_lane_points.json`：变换到参考帧 4 坐标系后的左右米制点。
+
+### 4.4 阶段 02：当前保留的改进 RANSAC
+
+调用链：
+
+```text
+pycharm_entrypoints/02_run_optimized_ransac.py
+  -> scripts/run_selected_ransac_reference.py : run()
+     -> scripts/evaluate_denoise_methods.py : 读取、IPM、pose 对齐和评价函数
+     -> surf_bev/optimized_ransac.py : SideAwarePolynomialRansac
+     -> run_selected_ransac_reference.py : 坐标、图片、指标和审计导出
+```
+
+这里没有再次运行 CLRNet。入口读取阶段 01 保存的 `detected_lane_points.json`，再用相同标定和 pose 重建米制对齐点。这样 RANSAC 的输入来源和坐标转换过程可以单独审计。
+
+`surf_bev/optimized_ransac.py` 是当前 RANSAC 主体，主要过程是：
+
+1. 根据阶段 01 保存的 `side` 字段，把左、右车道分开拟合；
+2. 对每一侧拟合三次多项式 `X=f(Z)`；
+3. 对 `Z` 归一化，减小远距离数值过大造成的病态；
+4. 每个假设至少覆盖 `10 m` 的纵向范围，避免只抽到局部相邻点；
+5. 点到模型的当前残差为同一 `Z` 下的横向差 `|X-X_model(Z)|`；
+6. 内点阈值随距离增长：
+   `threshold(Z)=min(0.35+0.015*max(Z-3,0), 0.80)`，单位为米；
+7. 评分同时考虑全体内点比例和不同距离段的内点比例，降低近处密集点支配结果的风险；
+8. 选择最佳假设后进行一次局部最小二乘重拟合；
+9. 左右两侧掩码合并后导出去噪坐标和逐点决定。
+
+主体文件职责：
+
+- `scripts/run_selected_ransac_reference.py`：固定并记录本次采用的参数，调用算法，生成输出和审计 JSON；
+- `surf_bev/optimized_ransac.py`：改进 RANSAC 的抽样、阈值、评分和重拟合实现；
+- `scripts/evaluate_denoise_methods.py`：复用二维点读取、手工标注读取、IPM、pose 对齐、栅格显示和评价函数；
+- `annotations/kitti00_first5_manual_annotations.json`：只用于防止过度删点的手工伪参考评价，不参与模型训练，也不是 KITTI 官方真值。
+
+要修改 RANSAC 数学过程，应进入 `surf_bev/optimized_ransac.py`；要更换固定参数，应查看 `run_selected_ransac_reference.py` 中的 `SELECTED_CONFIG`；要修改输入重建或评价，应进入 `evaluate_denoise_methods.py`。
+
+### 4.5 阶段 03：多项式与 B 样条曲线比较
+
+调用链：
+
+```text
+pycharm_entrypoints/03_compare_curve_models.py
+  -> scripts/compare_polynomial_bspline.py : run()
+     -> scripts/analyze_lane_curve_hierarchy.py
+        -> select_smoothing()
+        -> polynomial_lofo()
+        -> fit_sides()
+     -> scripts/fit_first5_two_curves.py
+        -> aggregate_equal_frame_bins()
+        -> fit_robust_spline()
+        -> leave_one_frame_out()
+        -> export_fit()
+```
+
+阶段 03 直接读取阶段 01 的 `aligned_lane_points.json`，不读取阶段 02 的 RANSAC 输出。当前用途是公平比较曲线模型，不是“RANSAC 后再拟合”。
+
+实际处理过程：
+
+1. 左右车道始终分开；
+2. `aggregate_equal_frame_bins()` 按 `Z` 分箱，每帧在每个箱中只贡献一个中位数，再跨帧取中位数，避免某帧点数更多就获得更大权重；
+3. `polynomial_lofo()` 分别比较 1、2、3 次鲁棒多项式 `X=f(Z)`；
+4. `fit_robust_spline()` 使用弦长参数表示曲线，同时拟合 `X(u),Z(u)` 的三次参数 B 样条；
+5. Huber-IRLS 根据当前残差反复降低离群聚合点的权重，但最低权重保留为 `0.05`；
+6. `select_smoothing()` 在给定平滑参数网格中做留一帧评价，并使用一标准误差规则选择更平滑且评价没有明显变差的结果；
+7. 留一帧评价每次拿出一帧，用其余帧拟合，再计算被拿出帧的点到曲线距离；它反映对当前 CLRNet/IPM 点的跨帧一致性，不是官方车道线准确率；
+8. 最后导出左右曲线坐标、多项式/B样条对比图、每折指标和 `RESULT.json`。
+
+主体文件职责：
+
+- `scripts/compare_polynomial_bspline.py`：模型比较的总编排和结果汇总；
+- `scripts/analyze_lane_curve_hierarchy.py`：平滑参数选择、鲁棒多项式、留一帧评价及分段稀疏融合研究函数；当前 03 只调用其中模型比较部分；
+- `scripts/fit_first5_two_curves.py`：左右点分组、等帧权重分箱、鲁棒 B 样条、曲线距离、绘图和坐标导出。
+
+阶段 03 当前明确停止在“多项式/B样条比较和两条曲线导出”，不执行后续的分段特征点再融合。
+
+### 4.6 在 PyCharm 中顺着调用链看代码
+
+1. 从 `pycharm_entrypoints` 的入口开始；
+2. 对导入的模块名或函数名按住 `Ctrl` 并单击，进入 `scripts`；
+3. 在 `scripts` 中继续对 `CLRNetLaneDetector`、`image_to_ground_ipm`、`transform_lane_points_by_pose`、`SideAwarePolynomialRansac` 等名称按 `Ctrl+B`；
+4. 在目标函数左侧单击设置断点；
+5. 回到入口文件，右键选择 `Debug`；
+6. 查看 Variables 中的 `lanes`、`ground`、`aligned`、`keep`、`model_rows` 等中间变量。
+
+修改规则：工作站路径和默认实验参数放在 `pycharm_entrypoints`；模块调用顺序、输入输出和评价放在 `scripts`；数学和几何核心放在 `surf_bev`；CLRNet 网络内部放在独立的 `CLRNet`。这样可以避免把同一算法复制成多份。
+
+## 5. PyCharm 运行配置怎么处理
 
 组内统一使用右键运行 `pycharm_entrypoints` 后由 PyCharm 自动生成的四个同名配置：
 
@@ -182,7 +372,7 @@ pycharm_outputs\LATEST_PIPELINE.json
 
 四个新入口会自动生成带微秒时间戳的新输出目录，因此每次可直接重跑，不需要手工改 `--output-dir`。如果为了单独调试而直接运行 `scripts` 中的核心 CLI，才需要提供完整参数，并为 `--output-dir` 指定新目录。
 
-## 5. 目录与代码职责
+## 6. 目录与代码职责
 
 ### `CLRNet/`
 
@@ -256,7 +446,7 @@ PowerShell 一键入口。PyCharm 用户不需要把 `.ps1` 当作 Python 运行
 
 两类输出不要混用。结果文件不提交到代码仓库。
 
-## 6. 常见问题
+## 7. 常见问题
 
 ### `torch.load(... weights_only=False)` FutureWarning
 
@@ -285,7 +475,7 @@ Working directory 必须是 `<PROJECT_ROOT>`。`check_windows_env.py` 会使用 
 
 `workstation_release/*.ps1` 是 PowerShell 命令行入口；PyCharm 使用上表的 Python 入口。
 
-## 7. 调试原则
+## 8. 调试原则
 
 1. 在入口文件、`scripts` 或 `surf_bev` 中设置断点，使用 PyCharm `Debug`；
 2. 先确认输入文件存在，再检查算法；
@@ -295,7 +485,7 @@ Working directory 必须是 `<PROJECT_ROOT>`。`check_windows_env.py` 会使用 
 6. 不把内部一致性、像素重叠率或手工伪参考一致性称为官方准确率；
 7. 环境已经通过时，不随意重新安装依赖或重新运行兼容补丁。
 
-## 8. 最短复现清单
+## 9. 最短复现清单
 
 1. 打开 `<PROJECT_ROOT>`；
 2. 核对右下角为 `Python 3.10 (surf2026-win)`；
