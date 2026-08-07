@@ -494,3 +494,23 @@ Working directory 必须是 `<PROJECT_ROOT>`。`check_windows_env.py` 会使用 
 5. 分别运行 `pycharm_entrypoints/02_run_optimized_ransac.py` 和 `03_compare_curve_models.py`；
 6. 核对退出代码、JSON、点坐标和图片；
 7. 重跑时由入口自动创建时间戳目录，旧结果保持不变。
+
+## 10. 扩展到 0–1000 帧的候选实验
+
+扩大候选图片范围时，使用：
+
+```text
+scripts/run_extended_1000_curve_models_windows.ps1
+```
+
+该总控脚本默认扫描第 0–1000 帧，输出最多 100 个候选连续路段，再只对指定候选分别调用：
+
+- `scripts/fit_extended_polynomial.py`：多项式独立主体；
+- `scripts/fit_extended_bspline.py`：B 样条独立主体；
+- `scripts/extended_curve_model_common.py`：共享读取和已审核的 pose/Frenet 数据准备，不包含曲线模型。
+
+完整命令、候选排名、复用扫描和输出说明见：
+
+```text
+README_EXTENDED_1000_ZH.md
+```

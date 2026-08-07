@@ -44,6 +44,18 @@ def parse_args() -> argparse.Namespace:
         help="Frame step between block starts; defaults to non-overlapping block-size.",
     )
     parser.add_argument("--minimum-valid-frames-per-block", type=int, default=5)
+    parser.add_argument(
+        "--selected-rank",
+        type=int,
+        default=1,
+        help="One-based candidate rank to materialize as selection.json.",
+    )
+    parser.add_argument(
+        "--top-candidate-count",
+        type=int,
+        default=100,
+        help="Maximum ranked candidates to export for later review or reruns.",
+    )
     return parser.parse_args()
 
 
@@ -114,6 +126,10 @@ def main() -> None:
         raise ValueError("block-stride must be between 1 and block-size.")
     if not 1 <= args.minimum_valid_frames_per_block <= args.block_size:
         raise ValueError("minimum-valid-frames-per-block is outside the block size.")
+    if args.selected_rank < 1 or args.top_candidate_count < 1:
+        raise ValueError("selected-rank and top-candidate-count must be positive.")
+    if args.selected_rank > args.top_candidate_count:
+        raise ValueError("selected-rank cannot exceed top-candidate-count.")
     if args.output_dir.exists() and any(args.output_dir.iterdir()):
         raise ValueError(f"Output directory must be new or empty: {args.output_dir}")
     args.output_dir.mkdir(parents=True, exist_ok=True)
@@ -139,7 +155,7 @@ def main() -> None:
             )
         )
     if not candidates:
-        raise ValueError("No complete 150-frame candidate exists in the scans.")
+        raise ValueError("No complete fixed-window candidate exists in the scans.")
 
     ranked = sorted(
         candidates,
@@ -151,7 +167,40 @@ def main() -> None:
         ),
         reverse=True,
     )
-    selected = ranked[0]
+    if args.selected_rank > len(ranked):
+        raise ValueError(
+            f"selected-rank {args.selected_rank} exceeds {len(ranked)} candidates."
+        )
+    selected = ranked[args.selected_rank - 1]
+    exported = ranked[: args.top_candidate_count]
+    write_csv(
+        args.output_dir / "candidate_options.csv",
+        [
+            {
+                "rank": rank,
+                "start_frame": item["start_frame"],
+                "end_frame": item["end_frame"],
+                "all_blocks_meet_minimum": item["all_blocks_meet_minimum"],
+                "minimum_valid_frames_in_a_block": item[
+                    "minimum_valid_frames_in_a_block"
+                ],
+                "total_valid_frame_uses": item["total_valid_frames"],
+                "block_valid_counts": ";".join(
+                    map(str, item["block_valid_counts"])
+                ),
+                "path_length_m": item["path_length_m"],
+                "net_heading_change_deg": item["net_heading_change_deg"],
+                "total_absolute_heading_change_deg": item[
+                    "total_absolute_heading_change_deg"
+                ],
+                "scan_json": item["scan_json"],
+                "selected_lane_points_json": item[
+                    "selected_lane_points_json"
+                ],
+            }
+            for rank, item in enumerate(exported, start=1)
+        ],
+    )
     start = int(selected["start_frame"])
     block_rows = []
     manual_frame_ids = []
@@ -217,6 +266,12 @@ def main() -> None:
         "overlap_frames_between_adjacent_blocks": args.block_size - block_stride,
         "total_unique_frames": args.block_size + (args.block_count - 1) * block_stride,
         "minimum_valid_frames_per_block_required": args.minimum_valid_frames_per_block,
+        "selected_rank": args.selected_rank,
+        "available_candidate_count": len(ranked),
+        "exported_candidate_count": len(exported),
+        "candidate_options_csv": str(
+            (args.output_dir / "candidate_options.csv").resolve()
+        ),
         "selected": selected,
         "blocks": block_rows,
         "manual_annotation_frame_ids": manual_frame_ids,
@@ -226,7 +281,7 @@ def main() -> None:
             "of interpolating through occlusion"
         ),
         "package_zip": str(package_zip.resolve()),
-        "top_candidates": ranked[:20],
+        "top_candidates": exported,
         "warnings": [
             "Five valid frames per block is a feasibility floor, not proof of accuracy.",
             "All selected candidate identities still require visual inspection.",

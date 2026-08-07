@@ -42,6 +42,20 @@ def comma_ints(value: str) -> list[int]:
     return [int(item.strip()) for item in value.split(",") if item.strip()]
 
 
+def resolve_frame_ids(args: argparse.Namespace) -> list[int]:
+    """Resolve either an explicit list or one inclusive frame interval."""
+
+    if args.frame_ids is not None:
+        if args.frame_end is not None:
+            raise ValueError("--frame-end cannot be combined with --frame-ids.")
+        return comma_ints(args.frame_ids)
+    if args.frame_start is None or args.frame_end is None:
+        raise ValueError("Use --frame-ids or provide both --frame-start and --frame-end.")
+    if args.frame_start < 0 or args.frame_end < args.frame_start:
+        raise ValueError("Frame range must satisfy 0 <= frame-start <= frame-end.")
+    return list(range(args.frame_start, args.frame_end + 1))
+
+
 def parse_range(value: str, option: str) -> tuple[float, float]:
     parts = [float(item.strip()) for item in value.split(",")]
     if len(parts) != 2 or not parts[0] < parts[1]:
@@ -326,7 +340,14 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--image-dir", type=Path, required=True)
     parser.add_argument("--image-pattern", default="{frame_id:06d}.png")
-    parser.add_argument("--frame-ids", required=True)
+    frame_group = parser.add_mutually_exclusive_group(required=True)
+    frame_group.add_argument("--frame-ids")
+    frame_group.add_argument("--frame-start", type=int)
+    parser.add_argument(
+        "--frame-end",
+        type=int,
+        help="Inclusive end frame; required when --frame-start is used.",
+    )
     parser.add_argument("--calib", type=Path, required=True)
     parser.add_argument("--poses", type=Path, required=True)
     parser.add_argument("--output-dir", type=Path, required=True)
@@ -344,12 +365,20 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument("--clrnet-checkpoint", default="weights/culane_r18.pth")
     parser.add_argument("--device", choices=("cuda", "cpu"), default="cuda")
+    parser.add_argument(
+        "--skip-recommendation",
+        action="store_true",
+        help=(
+            "Skip the scanner's single longest-window recommendation. Use this "
+            "for large range scans followed by select_hierarchy_150_frames.py."
+        ),
+    )
     return parser.parse_args()
 
 
 def main() -> None:
     args = parse_args()
-    frame_ids = comma_ints(args.frame_ids)
+    frame_ids = resolve_frame_ids(args)
     local_z_range = parse_range(args.local_z_range, "--local-z-range")
     fusion_x_range = parse_range(args.fusion_x_range, "--fusion-x-range")
     fusion_z_range = parse_range(args.fusion_z_range, "--fusion-z-range")
@@ -484,18 +513,27 @@ def main() -> None:
         writer.writeheader()
         writer.writerows(rows)
 
-    recommendation = select_window_with_aligned_points(
-        rows,
-        poses_image,
-        ground_lanes,
-        segment_size=args.segment_size,
-        minimum_candidates=args.minimum_candidates,
-        minimum_points_per_side=args.minimum_bev_points_per_side,
-        fusion_x_range=fusion_x_range,
-        fusion_z_range=fusion_z_range,
-        camera_height=args.camera_height,
-        pitch_deg=args.pitch_deg,
-    )
+    if args.skip_recommendation:
+        recommendation = {
+            "status": "not_requested",
+            "reason": (
+                "Large-range scan requested. Candidate windows are ranked by "
+                "select_hierarchy_150_frames.py instead."
+            ),
+        }
+    else:
+        recommendation = select_window_with_aligned_points(
+            rows,
+            poses_image,
+            ground_lanes,
+            segment_size=args.segment_size,
+            minimum_candidates=args.minimum_candidates,
+            minimum_points_per_side=args.minimum_bev_points_per_side,
+            fusion_x_range=fusion_x_range,
+            fusion_z_range=fusion_z_range,
+            camera_height=args.camera_height,
+            pitch_deg=args.pitch_deg,
+        )
     report = {
         "status": "complete",
         "requested_frame_ids": frame_ids,

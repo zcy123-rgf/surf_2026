@@ -19,6 +19,7 @@ if (Test-Path -LiteralPath $Destination) {
 $Files = @(
     ".gitignore",
     "README_PYCHARM_WORKSTATION_ZH.md",
+    "README_EXTENDED_1000_ZH.md",
     "requirements.txt",
     "requirements-windows.txt",
     "run_demo.py"
@@ -39,6 +40,13 @@ $ScriptFiles = @(
     "fit_first5_two_curves.py",
     "analyze_lane_curve_hierarchy.py",
     "compare_polynomial_bspline.py",
+    "scan_clrnet_lane_counts.py",
+    "select_hierarchy_150_frames.py",
+    "run_weekly_lane_hierarchy.py",
+    "extended_curve_model_common.py",
+    "fit_extended_polynomial.py",
+    "fit_extended_bspline.py",
+    "run_extended_1000_curve_models_windows.ps1",
     "setup_clrnet_windows.ps1"
 )
 $ScriptDirectories = @("clrnet_compat", "patches")
