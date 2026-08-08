@@ -72,3 +72,35 @@ def test_overlapping_ten_by_fifteen_windows_cover_105_unique_frames(tmp_path):
     assert result[0]["start_frame"] == 0
     assert result[0]["end_frame"] == 104
     assert result[0]["block_valid_counts"] == [15] * 10
+
+
+def test_candidate_counts_sustained_position_trajectory_turns(tmp_path):
+    count = 170
+    rows = [
+        {
+            "frame_id": frame_id,
+            "candidate_count": 2,
+            "eligible_for_two_curve_fit": True,
+        }
+        for frame_id in range(count)
+    ]
+    poses = np.zeros((count, 3, 4), dtype=np.float64)
+    poses[:, 0, 0] = 1.0
+    poses[:, 1, 1] = 1.0
+    poses[:, 2, 2] = 1.0
+    angle = np.linspace(0.0, np.pi / 2.0, count)
+    poses[:, 0, 3] = 30.0 * np.sin(angle)
+    poses[:, 2, 3] = 30.0 * (1.0 - np.cos(angle))
+    result = SELECTOR.candidate_spans(
+        rows,
+        poses,
+        block_size=15,
+        block_count=10,
+        block_stride=10,
+        minimum_valid=10,
+        scan_json=tmp_path / "scan.json",
+        minimum_trajectory_turn_deg_per_block=1.0,
+    )
+    assert result[0]["sustained_turn_block_count"] >= 8
+    assert result[0]["maximum_deviation_from_chord_m"] > 1.0
+    assert result[0]["path_displacement_ratio"] > 1.0

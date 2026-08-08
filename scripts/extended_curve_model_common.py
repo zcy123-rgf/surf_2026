@@ -130,9 +130,12 @@ def audit_document(
     data: ExtendedCurveInput, args: argparse.Namespace
 ) -> dict[str, object]:
     return {
-        "dataset": "KITTI Odometry Sequence 00",
+        "dataset": data.selection.get(
+            "dataset", "KITTI Odometry Sequence 00"
+        ),
         "requested_search_is_not_one_curve": (
-            "The 0-1000 scan supplies candidate road sections. Only the selected "
+            "The configured sequence scan supplies candidate road sections. "
+            "Only the selected "
             "ranked section is fitted in this output."
         ),
         "selected_option_rank": int(data.selection.get("selected_rank", 1)),

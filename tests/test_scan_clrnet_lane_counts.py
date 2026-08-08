@@ -106,3 +106,14 @@ def test_longer_valid_window_has_priority_over_curvature():
     )
     assert result["status"] == "selected"
     assert result["frame_ids"] == list(range(10))
+
+
+def test_position_trajectory_metric_rejects_yaw_only_false_curve():
+    poses = make_poses(20)
+    poses[:, 0, 3] = 0.0
+    poses[:, 2, 3] = np.arange(20, dtype=np.float64)
+    stats = SCANNER.pose_window_stats(poses, list(range(20)))
+    assert stats["net_heading_change_deg"] > 20.0
+    assert abs(stats["trajectory_net_heading_change_deg"]) < 1e-9
+    assert stats["maximum_deviation_from_chord_m"] < 1e-9
+    assert abs(stats["path_displacement_ratio"] - 1.0) < 1e-9

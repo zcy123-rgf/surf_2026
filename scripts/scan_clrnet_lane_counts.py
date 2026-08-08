@@ -160,13 +160,45 @@ def pose_window_stats(poses: np.ndarray, frame_ids: list[int]) -> dict[str, floa
     forward = rotations[:, :, 2]
     yaw = np.unwrap(np.arctan2(forward[:, 0], forward[:, 2]))
     steps = np.diff(positions, axis=0)
+    path_length = float(np.linalg.norm(steps, axis=1).sum())
+    displacement = float(np.linalg.norm(positions[-1] - positions[0]))
+
+    # Keep camera-yaw diagnostics, but do not silently equate a brief steering
+    # correction with road curvature.  These additional metrics are based on
+    # the actual X/Z position trajectory.
+    baseline = max(1, min(10, (len(positions) - 1) // 3))
+    start_vector = positions[baseline] - positions[0]
+    end_vector = positions[-1] - positions[-1 - baseline]
+    start_heading = float(np.arctan2(start_vector[0], start_vector[1]))
+    end_heading = float(np.arctan2(end_vector[0], end_vector[1]))
+    trajectory_turn = float(
+        np.arctan2(
+            np.sin(end_heading - start_heading),
+            np.cos(end_heading - start_heading),
+        )
+    )
+
+    chord = positions[-1] - positions[0]
+    if displacement > 1e-9:
+        relative = positions - positions[0]
+        chord_deviation = np.abs(
+            chord[1] * relative[:, 0] - chord[0] * relative[:, 1]
+        ) / displacement
+        maximum_chord_deviation = float(chord_deviation.max())
+        path_displacement_ratio = path_length / displacement
+    else:
+        maximum_chord_deviation = 0.0
+        path_displacement_ratio = float("inf")
     return {
-        "path_length_m": float(np.linalg.norm(steps, axis=1).sum()),
-        "displacement_m": float(np.linalg.norm(positions[-1] - positions[0])),
+        "path_length_m": path_length,
+        "displacement_m": displacement,
         "net_heading_change_deg": float(np.degrees(yaw[-1] - yaw[0])),
         "total_absolute_heading_change_deg": float(
             np.degrees(np.abs(np.diff(yaw)).sum())
         ),
+        "trajectory_net_heading_change_deg": float(np.degrees(trajectory_turn)),
+        "maximum_deviation_from_chord_m": maximum_chord_deviation,
+        "path_displacement_ratio": path_displacement_ratio,
     }
 
 
@@ -338,6 +370,9 @@ def select_window_with_aligned_points(
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument(
+        "--dataset-name", default="KITTI Odometry Sequence 00"
+    )
     parser.add_argument("--image-dir", type=Path, required=True)
     parser.add_argument("--image-pattern", default="{frame_id:06d}.png")
     frame_group = parser.add_mutually_exclusive_group(required=True)
@@ -536,6 +571,7 @@ def main() -> None:
         )
     report = {
         "status": "complete",
+        "dataset": args.dataset_name,
         "requested_frame_ids": frame_ids,
         "frame_count": len(frame_ids),
         "frames_with_at_least_two_candidates": sum(
@@ -561,6 +597,7 @@ def main() -> None:
     )
     point_document = {
         "status": "complete",
+        "dataset": args.dataset_name,
         "coordinate_system": (
             "per-frame image-camera ground X/Z in metres; X right, Z forward"
         ),

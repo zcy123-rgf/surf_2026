@@ -207,3 +207,9 @@ If you only have images and no odometry poses, the project can still generate si
 - `calib` and `poses` are required for true multi-frame fusion.
 - Without calibration, the single-frame demo uses approximate camera intrinsics so the BEV output is only a runnable visualization, not metric-accurate.
 - For production-quality results, fine-tune CLRNet on the project camera/data distribution and tune `camera-height`, `pitch-deg`, `x-range`, and `z-range`.
+
+## Windows: independent KITTI sequences 00-09
+
+To scan and process KITTI Odometry Sequences 00 through 09 independently,
+use `scripts/run_sequences00_09_curve_models_windows.ps1`.  The Chinese
+workstation guide is `README_SEQUENCES00_09_WINDOWS_ZH.md`.

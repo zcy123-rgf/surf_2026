@@ -20,6 +20,7 @@ $Files = @(
     ".gitignore",
     "README_PYCHARM_WORKSTATION_ZH.md",
     "README_EXTENDED_1000_ZH.md",
+    "README_SEQUENCES00_09_WINDOWS_ZH.md",
     "requirements.txt",
     "requirements-windows.txt",
     "run_demo.py"
@@ -34,6 +35,7 @@ $Directories = @(
 $ScriptFiles = @(
     "check_windows_env.py",
     "kitti00_workstation_input.ps1",
+    "kitti_odometry_workstation_input.ps1",
     "run_full_point_pipeline.py",
     "evaluate_denoise_methods.py",
     "run_selected_ransac_reference.py",
@@ -47,6 +49,8 @@ $ScriptFiles = @(
     "fit_extended_polynomial.py",
     "fit_extended_bspline.py",
     "run_extended_1000_curve_models_windows.ps1",
+    "run_single_odometry_sequence_curve_windows.ps1",
+    "run_sequences00_09_curve_models_windows.ps1",
     "setup_clrnet_windows.ps1"
 )
 $ScriptDirectories = @("clrnet_compat", "patches")
