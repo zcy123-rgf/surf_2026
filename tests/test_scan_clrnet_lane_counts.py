@@ -37,6 +37,40 @@ def rows(counts: list[int]) -> list[dict[str, object]]:
     ]
 
 
+def lane_at_bottom_x(x: float) -> np.ndarray:
+    return np.asarray([[x, 100.0], [x, 200.0], [x, 300.0]])
+
+
+def test_ego_adjacent_selects_nearest_candidate_on_each_side_of_center():
+    lanes = [lane_at_bottom_x(100.0), lane_at_bottom_x(500.0), lane_at_bottom_x(900.0)]
+    indices, selected, reason = SCANNER.select_candidate_pair(
+        lanes, mode="ego_adjacent", image_center_x=620.0
+    )
+    assert indices == [1, 2]
+    assert [SCANNER.bottom_x(lane) for lane in selected] == [500.0, 900.0]
+    assert reason == "selected_nearest_on_each_side_of_camera_center"
+
+
+def test_outermost_mode_preserves_legacy_pairing():
+    lanes = [lane_at_bottom_x(100.0), lane_at_bottom_x(500.0), lane_at_bottom_x(900.0)]
+    indices, selected, reason = SCANNER.select_candidate_pair(
+        lanes, mode="outermost", image_center_x=620.0
+    )
+    assert indices == [0, 2]
+    assert [SCANNER.bottom_x(lane) for lane in selected] == [100.0, 900.0]
+    assert reason == "selected_outermost"
+
+
+def test_ego_adjacent_rejects_frame_without_both_sides():
+    lanes = [lane_at_bottom_x(100.0), lane_at_bottom_x(500.0)]
+    indices, selected, reason = SCANNER.select_candidate_pair(
+        lanes, mode="ego_adjacent", image_center_x=620.0
+    )
+    assert indices == []
+    assert selected == []
+    assert reason == "missing_candidate_on_one_side_of_camera_center"
+
+
 def test_eligible_runs_split_on_single_candidate_frame():
     result = SCANNER.eligible_runs(rows([2, 3, 1, 2, 2, 1, 4]))
     assert result == [[0, 1], [3, 4], [6]]

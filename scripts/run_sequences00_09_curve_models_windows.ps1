@@ -12,6 +12,8 @@ param(
     [ValidateSet("coverage", "sustained_curve")]
     [string]$RankingMode = "sustained_curve",
     [double]$MinimumTrajectoryTurnDegPerBlock = 1.0,
+    [ValidateSet("outermost", "ego_adjacent")]
+    [string]$CandidateSelectionMode = "ego_adjacent",
     [ValidateSet("both", "polynomial", "bspline")]
     [string]$Model = "both",
     [string]$BatchOutputRoot = "",
@@ -126,6 +128,7 @@ foreach ($SequenceId in $SequenceIds) {
             -RankingMode $RankingMode `
             -MinimumTrajectoryTurnDegPerBlock `
                 $MinimumTrajectoryTurnDegPerBlock `
+            -CandidateSelectionMode $CandidateSelectionMode `
             -Model $Model `
             -OutputDir $SequenceOutput `
             -SkipPreflight | Out-Host
@@ -179,6 +182,7 @@ foreach ($SequenceId in $SequenceIds) {
         sequences_finished = $Rows.Count
         total_dataset_frames = $TotalFrameCount
         ranking_mode = $RankingMode
+        candidate_selection_mode = $CandidateSelectionMode
         previous_outputs_modified = $false
         results = $Rows
     } | ConvertTo-Json -Depth 7 | Set-Content `
@@ -197,6 +201,7 @@ $FinalStatus = if ($Failed -eq 0) { "complete" } else { "complete_with_failures"
     failed_sequence_count = $Failed
     total_dataset_frames = $TotalFrameCount
     ranking_mode = $RankingMode
+    candidate_selection_mode = $CandidateSelectionMode
     previous_outputs_modified = $false
     results = $Rows
 } | ConvertTo-Json -Depth 7 | Set-Content `

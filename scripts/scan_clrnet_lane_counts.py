@@ -1,8 +1,10 @@
 """Audit CLRNet candidate counts before fitting two lane curves.
 
 This scanner performs live inference but does not invent a missing lane.  It
-selects only a contiguous subrange in which every frame has at least two CLRNet
-candidates.  The selected length is a multiple of the requested segment size.
+can either preserve the legacy outermost-candidate policy or select the nearest
+candidate on each side of the calibrated camera centre.  The latter targets
+the two boundaries adjacent to the ego vehicle when more than two candidates
+are present.  Frames without a candidate on both sides are marked invalid.
 """
 
 from __future__ import annotations
@@ -106,10 +108,68 @@ def bottom_x(lane: np.ndarray) -> float:
     return float(np.median(lane[lane[:, 1] >= threshold, 0]))
 
 
+def select_candidate_pair(
+    lanes: list[np.ndarray], mode: str, image_center_x: float
+) -> tuple[list[int], list[np.ndarray], str]:
+    """Select an ordered left/right pair without synthesizing a missing side."""
+
+    indexed = [
+        (index, lane, bottom_x(lane)) for index, lane in enumerate(lanes)
+    ]
+    if len(indexed) < 2:
+        return [], [], "fewer_than_two_candidates"
+
+    ordered = sorted(indexed, key=lambda item: item[2])
+    if mode == "outermost":
+        chosen = [ordered[0], ordered[-1]]
+        return (
+            [int(item[0]) for item in chosen],
+            [item[1] for item in chosen],
+            "selected_outermost",
+        )
+    if mode != "ego_adjacent":
+        raise ValueError(f"Unsupported candidate-selection mode: {mode}")
+
+    left = [item for item in indexed if item[2] < image_center_x]
+    right = [item for item in indexed if item[2] > image_center_x]
+    if not left or not right:
+        return [], [], "missing_candidate_on_one_side_of_camera_center"
+    chosen = [max(left, key=lambda item: item[2]), min(right, key=lambda item: item[2])]
+    return (
+        [int(item[0]) for item in chosen],
+        [item[1] for item in chosen],
+        "selected_nearest_on_each_side_of_camera_center",
+    )
+
+
 def draw_candidates(image: np.ndarray, lanes: list[np.ndarray]) -> np.ndarray:
     output = image.copy()
     for lane_index, lane in enumerate(lanes):
         color = COLORS_BGR[lane_index % len(COLORS_BGR)]
+        for point in np.asarray(lane, dtype=np.float64).reshape(-1, 2):
+            if np.isfinite(point).all():
+                cv2.circle(
+                    output,
+                    tuple(np.rint(point).astype(np.int32)),
+                    3,
+                    color,
+                    -1,
+                    cv2.LINE_AA,
+                )
+    return output
+
+
+def draw_selected_pair(
+    image: np.ndarray,
+    lanes: list[np.ndarray],
+    image_center_x: float,
+) -> np.ndarray:
+    """Draw only the selected left/right pair plus the calibrated centre."""
+
+    output = image.copy()
+    center = int(round(image_center_x))
+    cv2.line(output, (center, 0), (center, image.shape[0] - 1), (0, 255, 255), 1)
+    for lane, color in zip(lanes, ((255, 80, 80), (80, 80, 255))):
         for point in np.asarray(lane, dtype=np.float64).reshape(-1, 2):
             if np.isfinite(point).all():
                 cv2.circle(
@@ -388,6 +448,15 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--output-dir", type=Path, required=True)
     parser.add_argument("--segment-size", type=int, default=5)
     parser.add_argument("--minimum-candidates", type=int, default=2)
+    parser.add_argument(
+        "--candidate-selection-mode",
+        choices=("outermost", "ego_adjacent"),
+        default="outermost",
+        help=(
+            "outermost preserves the reviewed legacy result; ego_adjacent "
+            "selects the bottom-x candidate nearest to each side of P2 cx"
+        ),
+    )
     parser.add_argument("--minimum-bev-points-per-side", type=int, default=4)
     parser.add_argument("--camera-height", type=float, default=1.65)
     parser.add_argument("--pitch-deg", type=float, default=0.0)
@@ -449,6 +518,7 @@ def main() -> None:
         raise ValueError("Pose file does not cover every requested frame ID.")
 
     calibration = load_calibration(args.calib)
+    image_center_x = float(calibration["K"][0, 2])
     poses_image = []
     for row in pose_rows:
         pose = np.eye(4, dtype=np.float64)
@@ -462,18 +532,26 @@ def main() -> None:
     )
     (args.output_dir / "original_frames").mkdir(parents=True, exist_ok=True)
     (args.output_dir / "all_candidates").mkdir(parents=True, exist_ok=True)
+    (args.output_dir / "selected_pairs").mkdir(parents=True, exist_ok=True)
     rows: list[dict[str, object]] = []
     ground_lanes: dict[int, list[np.ndarray]] = {}
     point_records: list[dict[str, object]] = []
     for frame_id, image_path in zip(frame_ids, image_paths):
         image = imread(image_path)
         lanes = detector.detect(image)["lanes"]
-        selected_lanes: list[np.ndarray] = []
-        selected_indices: list[int] = []
         if len(lanes) >= args.minimum_candidates:
-            ordered = sorted(enumerate(lanes), key=lambda item: bottom_x(item[1]))
-            selected_indices = [int(ordered[0][0]), int(ordered[-1][0])]
-            selected_lanes = [ordered[0][1], ordered[-1][1]]
+            selected_indices, selected_lanes, pair_reason = select_candidate_pair(
+                lanes,
+                mode=args.candidate_selection_mode,
+                image_center_x=image_center_x,
+            )
+        else:
+            selected_indices, selected_lanes, pair_reason = (
+                [],
+                [],
+                "below_minimum_candidate_count",
+            )
+        selected_bottom_x = [bottom_x(lane) for lane in selected_lanes]
         projected_counts = [
             len(
                 image_to_ground_ipm(
@@ -504,7 +582,11 @@ def main() -> None:
             {
                 "frame_id": frame_id,
                 "candidate_count": len(lanes),
+                "candidate_selection_mode": args.candidate_selection_mode,
+                "image_center_x_px": image_center_x,
+                "pair_selection_reason": pair_reason,
                 "selected_candidate_indices": selected_indices,
+                "selected_candidate_bottom_x_px": selected_bottom_x,
                 "selected_lanes_image_xy_px": [lane.tolist() for lane in selected_lanes],
                 "selected_lanes_local_ground_xz_m": [
                     lane.tolist() for lane in ground_lanes[frame_id]
@@ -520,6 +602,10 @@ def main() -> None:
             args.output_dir / "all_candidates" / f"frame_{frame_id:06d}.png",
             draw_candidates(image, lanes),
         )
+        imwrite(
+            args.output_dir / "selected_pairs" / f"frame_{frame_id:06d}.png",
+            draw_selected_pair(image, selected_lanes, image_center_x),
+        )
         rows.append(
             {
                 "frame_id": frame_id,
@@ -528,6 +614,14 @@ def main() -> None:
                 "candidate_bottom_x_px": ";".join(
                     f"{bottom_x(lane):.6f}" for lane in lanes
                 ),
+                "candidate_selection_mode": args.candidate_selection_mode,
+                "image_center_x_px": image_center_x,
+                "pair_selection_reason": pair_reason,
+                "selected_candidate_indices": ";".join(map(str, selected_indices)),
+                "selected_candidate_bottom_x_px": ";".join(
+                    f"{value:.6f}" for value in selected_bottom_x
+                ),
+                "pair_selection_gate": len(selected_lanes) == 2,
                 "selected_projected_point_counts": ";".join(
                     str(count) for count in projected_counts
                 ),
@@ -574,8 +668,13 @@ def main() -> None:
         "dataset": args.dataset_name,
         "requested_frame_ids": frame_ids,
         "frame_count": len(frame_ids),
+        "candidate_selection_mode": args.candidate_selection_mode,
+        "calibrated_image_center_x_px": image_center_x,
         "frames_with_at_least_two_candidates": sum(
             int(row["candidate_count"]) >= 2 for row in rows
+        ),
+        "frames_with_selected_pair": sum(
+            bool(row["pair_selection_gate"]) for row in rows
         ),
         "frames_passing_metric_bev_gate": sum(
             bool(row["metric_bev_point_gate"]) for row in rows
@@ -584,6 +683,7 @@ def main() -> None:
         "recommendation": recommendation,
         "warnings": [
             "Candidate count does not prove left/right lane-boundary identity.",
+            "ego_adjacent is a geometric pairing rule, not a semantic proof that a candidate is painted lane marking.",
             "A selected image lane can still have too few valid points after metric IPM.",
             "Inspect original_frames and all_candidates before accepting a segment.",
             "No missing second lane is interpolated or synthesized by this scanner.",
@@ -604,10 +704,16 @@ def main() -> None:
         "camera_height_m": args.camera_height,
         "pitch_deg": args.pitch_deg,
         "local_z_range_m": list(local_z_range),
-        "selection": "outermost candidates ordered by bottom image x",
+        "candidate_selection_mode": args.candidate_selection_mode,
+        "calibrated_image_center_x_px": image_center_x,
+        "selection": (
+            "outermost candidates ordered by bottom image x"
+            if args.candidate_selection_mode == "outermost"
+            else "nearest bottom-x candidate on each side of calibrated P2 cx"
+        ),
         "frames": point_records,
         "warning": (
-            "Selected outer candidates are not guaranteed to be ego-lane boundaries."
+            "Geometrically selected candidates are not guaranteed to be painted lane markings."
         ),
     }
     (args.output_dir / "selected_lane_points.json").write_text(

@@ -25,8 +25,18 @@ def test_single_sequence_runner_uses_sequence_specific_inputs_and_metadata():
     assert '"--poses", $Kitti.Poses' in text
     assert '"--calib", $Kitti.Calib' in text
     assert '"--ranking-mode", $RankingMode' in text
+    assert '"--candidate-selection-mode", $CandidateSelectionMode' in text
+    assert '[string]$CandidateSelectionMode = "ego_adjacent"' in text
     assert '"sustained_curve"' in text
     assert "previous_outputs_modified = $false" in text
+
+
+def test_batch_runner_forwards_candidate_selection_mode():
+    text = (
+        ROOT / "scripts" / "run_sequences00_09_curve_models_windows.ps1"
+    ).read_text(encoding="utf-8")
+    assert '[string]$CandidateSelectionMode = "ego_adjacent"' in text
+    assert "-CandidateSelectionMode $CandidateSelectionMode" in text
 
 
 def test_release_copy_contains_multi_sequence_entrypoints():

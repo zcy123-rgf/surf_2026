@@ -15,6 +15,8 @@ param(
     [ValidateSet("coverage", "sustained_curve")]
     [string]$RankingMode = "sustained_curve",
     [double]$MinimumTrajectoryTurnDegPerBlock = 1.0,
+    [ValidateSet("outermost", "ego_adjacent")]
+    [string]$CandidateSelectionMode = "ego_adjacent",
     [ValidateSet("both", "polynomial", "bspline")]
     [string]$Model = "both",
     [string]$OutputDir = "",
@@ -132,6 +134,7 @@ Invoke-CondaPython -Label "2/5 CLRNet scan $StartFrame-$EndFrame" `
         "--poses", $Kitti.Poses,
         "--segment-size", "5",
         "--minimum-candidates", "2",
+        "--candidate-selection-mode", $CandidateSelectionMode,
         "--minimum-bev-points-per-side", "4",
         "--local-z-range=3,50",
         "--fusion-x-range=-20,20",
@@ -225,6 +228,7 @@ $RunStatus = @{
     sequence_frame_count = [int]$Kitti.FrameCount
     selected_rank = $SelectedRank
     ranking_mode = $RankingMode
+    candidate_selection_mode = $CandidateSelectionMode
     minimum_trajectory_turn_deg_per_block = $MinimumTrajectoryTurnDegPerBlock
     selected_frames = @(
         [int]$Selection.selected.start_frame,
