@@ -1,0 +1,83 @@
+{
+  "dataset": "KITTI Odometry Sequence 09",
+  "frames": [51, 61, 71, 81, 91, 101, 111, 121, 131, 141, 151, 155],
+  "image_size_wh_px": [1226, 370],
+  "annotation_type": "manual apparent left/right driving-boundary pseudo-labels",
+  "annotation_note": "Independently traced from the supplied original RGB images without viewing or copying CLRNet detections. The left reference follows the visible white road-edge marking and the right reference follows the road-side curb. These are single-annotator pseudo-labels, not official KITTI lane ground truth.",
+  "coordinate_convention": "image pixel [x, y] from top-left",
+  "annotator_count": 1,
+  "frames_xy": [
+    {
+      "frame_id": 51,
+      "left": [[371, 369], [397, 350], [420, 330], [439, 310], [453, 290], [463, 270], [467, 250], [466, 230], [458, 211], [443, 200]],
+      "right": [[1042, 369], [966, 347], [898, 326], [840, 304], [784, 281], [736, 260], [690, 241], [650, 224], [615, 212], [584, 204], [552, 198]],
+      "occlusion_note": "The road edge is visible on both sides; the right reference is the curb, not a painted lane marking."
+    },
+    {
+      "frame_id": 61,
+      "left": [[296, 369], [334, 350], [367, 330], [393, 310], [411, 290], [426, 270], [435, 250], [437, 230], [431, 212], [418, 199]],
+      "right": [[1112, 369], [1032, 351], [958, 331], [891, 309], [829, 289], [774, 271], [723, 253], [676, 235], [635, 221], [601, 210], [568, 201], [536, 195], [507, 190]],
+      "occlusion_note": "A pedestrian overlaps the far-right sidewalk but does not hide the selected curb samples."
+    },
+    {
+      "frame_id": 71,
+      "left": [[151, 369], [206, 350], [253, 330], [294, 310], [330, 289], [359, 270], [382, 250], [399, 231], [405, 212], [399, 197], [385, 186]],
+      "right": [[972, 369], [906, 349], [844, 329], [788, 310], [737, 291], [689, 272], [646, 254], [606, 237], [571, 222], [536, 209], [504, 197], [473, 190], [444, 185]],
+      "occlusion_note": "The road edge is visible on both sides; the right reference is the curb."
+    },
+    {
+      "frame_id": 81,
+      "left": [[140, 369], [194, 349], [243, 329], [286, 309], [324, 289], [355, 269], [379, 249], [395, 229], [400, 211], [392, 197], [378, 188]],
+      "right": [[873, 369], [825, 350], [779, 330], [737, 310], [695, 291], [657, 273], [621, 255], [589, 238], [559, 223], [532, 210], [506, 200], [478, 192], [455, 187]],
+      "occlusion_note": "The road edge is visible on both sides; the right reference is the curb."
+    },
+    {
+      "frame_id": 91,
+      "left": [[120, 369], [176, 349], [226, 329], [268, 309], [305, 289], [335, 269], [359, 249], [375, 230], [378, 213], [370, 200], [355, 191]],
+      "right": [[824, 369], [782, 350], [743, 329], [705, 310], [670, 291], [636, 273], [605, 255], [576, 238], [550, 224], [526, 211], [503, 202], [480, 195], [457, 190]],
+      "occlusion_note": "Strong illumination changes are present, but both selected boundaries remain visually traceable."
+    },
+    {
+      "frame_id": 101,
+      "left": [[160, 369], [210, 349], [255, 329], [294, 309], [327, 289], [354, 269], [374, 249], [387, 230], [388, 213], [381, 201], [368, 192]],
+      "right": [[826, 369], [781, 349], [741, 329], [704, 309], [669, 290], [637, 271], [608, 254], [579, 237], [555, 223], [530, 210], [506, 201], [482, 194], [458, 189]],
+      "occlusion_note": "The road edge is visible on both sides; the right reference is the curb."
+    },
+    {
+      "frame_id": 111,
+      "left": [[124, 369], [179, 350], [228, 330], [270, 310], [306, 290], [335, 270], [359, 250], [375, 230], [381, 213], [377, 200], [364, 192]],
+      "right": [[838, 369], [797, 350], [758, 330], [722, 310], [690, 291], [661, 273], [633, 255], [607, 238], [583, 224], [561, 211], [538, 201], [515, 194], [491, 189]],
+      "occlusion_note": "The road edge is visible on both sides; the right reference is the curb."
+    },
+    {
+      "frame_id": 121,
+      "left": [[360, 333], [379, 312], [393, 291], [404, 272], [412, 252], [413, 233], [407, 217], [395, 205]],
+      "right": [[853, 369], [814, 350], [777, 330], [741, 310], [708, 290], [677, 272], [649, 254], [623, 237], [600, 223], [580, 211], [560, 202], [539, 195], [519, 190]],
+      "occlusion_note": "A side-road opening interrupts the near-field left boundary. Only the clearly visible continuation of the main-road white edge is annotated; no hidden segment is interpolated."
+    },
+    {
+      "frame_id": 131,
+      "left": [[218, 369], [264, 349], [305, 329], [343, 309], [379, 289], [412, 270], [442, 251], [470, 234], [495, 219], [520, 207], [548, 198], [577, 192], [605, 187]],
+      "right": [[898, 369], [864, 349], [831, 329], [800, 310], [772, 291], [746, 273], [721, 256], [699, 240], [681, 225], [665, 212], [651, 202], [640, 195], [631, 190]],
+      "occlusion_note": "The left edge near the preceding junction is visually less certain; samples follow the apparent main-road continuation."
+    },
+    {
+      "frame_id": 141,
+      "left": [[258, 369], [303, 350], [343, 331], [379, 312], [411, 293], [441, 275], [470, 258], [495, 242], [519, 227], [541, 214], [560, 204], [578, 197], [596, 191]],
+      "right": [[916, 369], [884, 350], [854, 330], [825, 311], [799, 293], [776, 275], [755, 259], [736, 243], [721, 229], [707, 216], [696, 206], [686, 198], [679, 192]],
+      "occlusion_note": "Strong backlighting reduces far-field contrast; only visually traceable boundary positions are marked."
+    },
+    {
+      "frame_id": 151,
+      "left": [[225, 369], [273, 350], [318, 330], [359, 310], [397, 290], [431, 270], [462, 250], [491, 231], [516, 216], [540, 204], [562, 195], [584, 189], [606, 185]],
+      "right": [[906, 369], [875, 350], [845, 330], [817, 310], [791, 290], [768, 270], [747, 251], [729, 233], [714, 218], [701, 205], [690, 196], [681, 190], [674, 186]],
+      "occlusion_note": "Strong backlighting is present; the right reference follows the curb and the left reference follows the white road edge."
+    },
+    {
+      "frame_id": 155,
+      "left": [[236, 369], [283, 350], [326, 330], [366, 310], [402, 290], [435, 270], [466, 250], [494, 231], [518, 216], [541, 204], [562, 195], [582, 189], [602, 185]],
+      "right": [[911, 369], [882, 350], [854, 330], [827, 310], [803, 290], [781, 270], [761, 251], [744, 233], [730, 218], [718, 205], [708, 196], [700, 190], [694, 186]],
+      "occlusion_note": "Strong backlighting is present; the right reference follows the curb and the left reference follows the white road edge."
+    }
+  ]
+}
