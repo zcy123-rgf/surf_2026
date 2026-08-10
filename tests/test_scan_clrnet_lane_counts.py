@@ -71,6 +71,72 @@ def test_ego_adjacent_rejects_frame_without_both_sides():
     assert reason == "missing_candidate_on_one_side_of_camera_center"
 
 
+def test_temporal_pair_uses_pose_aligned_curve_distance_not_frame_local_index():
+    lanes = [
+        lane_at_bottom_x(100.0),
+        lane_at_bottom_x(500.0),
+        lane_at_bottom_x(740.0),
+        lane_at_bottom_x(1100.0),
+    ]
+    z = np.linspace(3.0, 30.0, 20)
+    candidates_ground = [
+        np.column_stack([np.full_like(z, -6.0), z]),
+        np.column_stack([np.full_like(z, -3.1), z]),
+        np.column_stack([np.full_like(z, 3.1), z]),
+        np.column_stack([np.full_like(z, 6.0), z]),
+    ]
+    previous = [
+        np.column_stack([np.full_like(z, -3.0), z]),
+        np.column_stack([np.full_like(z, 3.0), z]),
+    ]
+    pose = np.eye(4, dtype=np.float64)
+    indices, _, selected_ground, reason, costs = (
+        SCANNER.select_temporal_candidate_pair(
+            lanes,
+            candidates_ground,
+            image_center_x=620.0,
+            previous_ground_lanes=previous,
+            previous_pose=pose,
+            current_pose=pose,
+            camera_height=1.65,
+            pitch_deg=0.0,
+            maximum_match_cost_m=1.0,
+        )
+    )
+    assert indices == [1, 2]
+    assert reason == "matched_project_lane_tracks_with_pose"
+    assert len(selected_ground) == 2
+    assert max(costs) < 0.11
+
+
+def test_temporal_pair_invalidates_frame_when_track_gate_fails():
+    lanes = [lane_at_bottom_x(100.0), lane_at_bottom_x(900.0)]
+    z = np.linspace(3.0, 30.0, 20)
+    candidates_ground = [
+        np.column_stack([np.full_like(z, -8.0), z]),
+        np.column_stack([np.full_like(z, 8.0), z]),
+    ]
+    previous = [
+        np.column_stack([np.full_like(z, -3.0), z]),
+        np.column_stack([np.full_like(z, 3.0), z]),
+    ]
+    pose = np.eye(4, dtype=np.float64)
+    indices, selected, _, reason, _ = SCANNER.select_temporal_candidate_pair(
+        lanes,
+        candidates_ground,
+        image_center_x=620.0,
+        previous_ground_lanes=previous,
+        previous_pose=pose,
+        current_pose=pose,
+        camera_height=1.65,
+        pitch_deg=0.0,
+        maximum_match_cost_m=1.0,
+    )
+    assert indices == []
+    assert selected == []
+    assert "distance_gate_failed" in reason
+
+
 def test_eligible_runs_split_on_single_candidate_frame():
     result = SCANNER.eligible_runs(rows([2, 3, 1, 2, 2, 1, 4]))
     assert result == [[0, 1], [3, 4], [6]]

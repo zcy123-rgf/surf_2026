@@ -1,10 +1,11 @@
 """Audit CLRNet candidate counts before fitting two lane curves.
 
 This scanner performs live inference but does not invent a missing lane.  It
-can either preserve the legacy outermost-candidate policy or select the nearest
-candidate on each side of the calibrated camera centre.  The latter targets
-the two boundaries adjacent to the ego vehicle when more than two candidates
-are present.  Frames without a candidate on both sides are marked invalid.
+can preserve the legacy outermost-candidate policy, select the nearest
+candidate on each side of the calibrated camera centre, or temporally associate
+the ego-adjacent pair using KITTI poses.  Temporal track IDs are created by this
+project; CLRNet itself does not output a persistent lane identity.  Frames
+without a gated candidate on both sides are marked invalid.
 """
 
 from __future__ import annotations
@@ -139,6 +140,109 @@ def select_candidate_pair(
         [int(item[0]) for item in chosen],
         [item[1] for item in chosen],
         "selected_nearest_on_each_side_of_camera_center",
+    )
+
+
+def symmetric_curve_distance_m(first: np.ndarray, second: np.ndarray) -> float:
+    """Return a robust, order-independent distance between two metric curves."""
+
+    first = np.asarray(first, dtype=np.float64).reshape(-1, 2)
+    second = np.asarray(second, dtype=np.float64).reshape(-1, 2)
+    if len(first) < 2 or len(second) < 2:
+        return float("inf")
+    pairwise = np.linalg.norm(first[:, None, :] - second[None, :, :], axis=2)
+    return float(
+        0.5
+        * (
+            np.median(np.min(pairwise, axis=1))
+            + np.median(np.min(pairwise, axis=0))
+        )
+    )
+
+
+def select_temporal_candidate_pair(
+    lanes: list[np.ndarray],
+    candidate_ground_lanes: list[np.ndarray],
+    image_center_x: float,
+    previous_ground_lanes: list[np.ndarray] | None,
+    previous_pose: np.ndarray | None,
+    current_pose: np.ndarray,
+    camera_height: float,
+    pitch_deg: float,
+    maximum_match_cost_m: float,
+) -> tuple[
+    list[int],
+    list[np.ndarray],
+    list[np.ndarray],
+    str,
+    list[float | None],
+]:
+    """Associate ego-left/right candidates without treating CLRNet order as ID.
+
+    Candidate indices are only frame-local.  When a previous pair is available,
+    its metric points are transformed into the current camera frame with the
+    KITTI poses and matched independently on the left and right of the calibrated
+    image centre.  A failed distance gate invalidates the frame instead of
+    silently switching to a sidewalk or another lane marking.
+    """
+
+    if len(lanes) != len(candidate_ground_lanes):
+        raise ValueError("Image and metric candidate lists must have equal length.")
+    indexed = [
+        (index, lane, candidate_ground_lanes[index], bottom_x(lane))
+        for index, lane in enumerate(lanes)
+        if len(candidate_ground_lanes[index]) >= 2
+    ]
+    pools = [
+        [item for item in indexed if item[3] < image_center_x],
+        [item for item in indexed if item[3] > image_center_x],
+    ]
+    if not pools[0] or not pools[1]:
+        return [], [], [], "missing_metric_candidate_on_one_side", [None, None]
+
+    if previous_ground_lanes is None or previous_pose is None:
+        chosen = [
+            max(pools[0], key=lambda item: item[3]),
+            min(pools[1], key=lambda item: item[3]),
+        ]
+        return (
+            [int(item[0]) for item in chosen],
+            [item[1] for item in chosen],
+            [item[2] for item in chosen],
+            "initialized_temporal_tracks_from_ego_adjacent_pair",
+            [None, None],
+        )
+
+    chosen = []
+    costs: list[float | None] = []
+    for side_index, pool in enumerate(pools):
+        predicted = transform_lane_points_by_pose(
+            previous_ground_lanes[side_index],
+            previous_pose,
+            current_pose,
+            camera_height=camera_height,
+            pitch_deg=pitch_deg,
+        )
+        scored = [
+            (symmetric_curve_distance_m(predicted, item[2]), item) for item in pool
+        ]
+        cost, item = min(scored, key=lambda pair: pair[0])
+        if not np.isfinite(cost) or cost > maximum_match_cost_m:
+            return (
+                [],
+                [],
+                [],
+                f"temporal_{('left', 'right')[side_index]}_distance_gate_failed",
+                [*(costs), float(cost)],
+            )
+        chosen.append(item)
+        costs.append(float(cost))
+    return (
+        [int(item[0]) for item in chosen],
+        [item[1] for item in chosen],
+        [item[2] for item in chosen],
+        "matched_project_lane_tracks_with_pose",
+        costs,
     )
 
 
@@ -450,13 +554,16 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--minimum-candidates", type=int, default=2)
     parser.add_argument(
         "--candidate-selection-mode",
-        choices=("outermost", "ego_adjacent"),
+        choices=("outermost", "ego_adjacent", "temporal_ego"),
         default="outermost",
         help=(
             "outermost preserves the reviewed legacy result; ego_adjacent "
-            "selects the bottom-x candidate nearest to each side of P2 cx"
+            "selects the bottom-x candidate nearest to each side of P2 cx; "
+            "temporal_ego adds pose-based association and project-created track IDs"
         ),
     )
+    parser.add_argument("--temporal-maximum-match-cost-m", type=float, default=1.50)
+    parser.add_argument("--temporal-maximum-gap-frames", type=int, default=3)
     parser.add_argument("--minimum-bev-points-per-side", type=int, default=4)
     parser.add_argument("--camera-height", type=float, default=1.65)
     parser.add_argument("--pitch-deg", type=float, default=0.0)
@@ -497,6 +604,11 @@ def main() -> None:
             "segment-size, minimum-candidates and minimum-bev-points-per-side "
             "must all be >= 2."
         )
+    if (
+        args.temporal_maximum_match_cost_m <= 0
+        or args.temporal_maximum_gap_frames < 0
+    ):
+        raise ValueError("Temporal match cost must be positive and gap non-negative.")
     if args.output_dir.exists() and any(args.output_dir.iterdir()):
         raise ValueError(f"Output directory must be new or empty: {args.output_dir}")
     args.output_dir.mkdir(parents=True, exist_ok=True)
@@ -536,39 +648,14 @@ def main() -> None:
     rows: list[dict[str, object]] = []
     ground_lanes: dict[int, list[np.ndarray]] = {}
     point_records: list[dict[str, object]] = []
+    previous_temporal_ground: list[np.ndarray] | None = None
+    previous_temporal_pose: np.ndarray | None = None
+    previous_temporal_frame: int | None = None
+    temporal_track_generation = 0
     for frame_id, image_path in zip(frame_ids, image_paths):
         image = imread(image_path)
         lanes = detector.detect(image)["lanes"]
-        if len(lanes) >= args.minimum_candidates:
-            selected_indices, selected_lanes, pair_reason = select_candidate_pair(
-                lanes,
-                mode=args.candidate_selection_mode,
-                image_center_x=image_center_x,
-            )
-        else:
-            selected_indices, selected_lanes, pair_reason = (
-                [],
-                [],
-                "below_minimum_candidate_count",
-            )
-        selected_bottom_x = [bottom_x(lane) for lane in selected_lanes]
-        projected_counts = [
-            len(
-                image_to_ground_ipm(
-                    lane,
-                    calibration["K"],
-                    camera_height=args.camera_height,
-                    pitch_deg=args.pitch_deg,
-                    z_range=local_z_range,
-                )
-            )
-            for lane in selected_lanes
-        ]
-        metric_gate = (
-            len(projected_counts) == 2
-            and min(projected_counts) >= args.minimum_bev_points_per_side
-        )
-        ground_lanes[frame_id] = [
+        candidate_ground_lanes = [
             image_to_ground_ipm(
                 lane,
                 calibration["K"],
@@ -576,8 +663,73 @@ def main() -> None:
                 pitch_deg=args.pitch_deg,
                 z_range=local_z_range,
             )
-            for lane in selected_lanes
+            for lane in lanes
         ]
+        temporal_match_costs: list[float | None] = [None, None]
+        temporal_gap_reset = bool(
+            previous_temporal_frame is not None
+            and frame_id - previous_temporal_frame
+            > args.temporal_maximum_gap_frames + 1
+        )
+        if temporal_gap_reset:
+            previous_temporal_ground = None
+            previous_temporal_pose = None
+            previous_temporal_frame = None
+            temporal_track_generation += 1
+        if len(lanes) >= args.minimum_candidates:
+            if args.candidate_selection_mode == "temporal_ego":
+                (
+                    selected_indices,
+                    selected_lanes,
+                    selected_ground_lanes,
+                    pair_reason,
+                    temporal_match_costs,
+                ) = select_temporal_candidate_pair(
+                    lanes,
+                    candidate_ground_lanes,
+                    image_center_x=image_center_x,
+                    previous_ground_lanes=previous_temporal_ground,
+                    previous_pose=previous_temporal_pose,
+                    current_pose=poses_image[frame_id],
+                    camera_height=args.camera_height,
+                    pitch_deg=args.pitch_deg,
+                    maximum_match_cost_m=args.temporal_maximum_match_cost_m,
+                )
+            else:
+                selected_indices, selected_lanes, pair_reason = select_candidate_pair(
+                    lanes,
+                    mode=args.candidate_selection_mode,
+                    image_center_x=image_center_x,
+                )
+                selected_ground_lanes = [
+                    candidate_ground_lanes[index] for index in selected_indices
+                ]
+        else:
+            selected_indices, selected_lanes, selected_ground_lanes, pair_reason = (
+                [],
+                [],
+                [],
+                "below_minimum_candidate_count",
+            )
+        selected_bottom_x = [bottom_x(lane) for lane in selected_lanes]
+        projected_counts = [len(lane) for lane in selected_ground_lanes]
+        metric_gate = (
+            len(projected_counts) == 2
+            and min(projected_counts) >= args.minimum_bev_points_per_side
+        )
+        ground_lanes[frame_id] = selected_ground_lanes
+        if args.candidate_selection_mode == "temporal_ego" and metric_gate:
+            previous_temporal_ground = selected_ground_lanes
+            previous_temporal_pose = poses_image[frame_id]
+            previous_temporal_frame = frame_id
+        track_ids = (
+            [
+                f"ego_left_{temporal_track_generation:03d}",
+                f"ego_right_{temporal_track_generation:03d}",
+            ]
+            if args.candidate_selection_mode == "temporal_ego" and metric_gate
+            else []
+        )
         point_records.append(
             {
                 "frame_id": frame_id,
@@ -587,6 +739,9 @@ def main() -> None:
                 "pair_selection_reason": pair_reason,
                 "selected_candidate_indices": selected_indices,
                 "selected_candidate_bottom_x_px": selected_bottom_x,
+                "project_track_ids": track_ids,
+                "temporal_match_cost_m": temporal_match_costs,
+                "temporal_gap_reset": temporal_gap_reset,
                 "selected_lanes_image_xy_px": [lane.tolist() for lane in selected_lanes],
                 "selected_lanes_local_ground_xz_m": [
                     lane.tolist() for lane in ground_lanes[frame_id]
@@ -621,6 +776,12 @@ def main() -> None:
                 "selected_candidate_bottom_x_px": ";".join(
                     f"{value:.6f}" for value in selected_bottom_x
                 ),
+                "project_track_ids": ";".join(track_ids),
+                "temporal_match_cost_m": ";".join(
+                    "" if value is None else f"{value:.6f}"
+                    for value in temporal_match_costs
+                ),
+                "temporal_gap_reset": temporal_gap_reset,
                 "pair_selection_gate": len(selected_lanes) == 2,
                 "selected_projected_point_counts": ";".join(
                     str(count) for count in projected_counts
@@ -684,6 +845,8 @@ def main() -> None:
         "warnings": [
             "Candidate count does not prove left/right lane-boundary identity.",
             "ego_adjacent is a geometric pairing rule, not a semantic proof that a candidate is painted lane marking.",
+            "temporal_ego track IDs are created by this project and are not CLRNet or KITTI map lane IDs.",
+            "Pose continuity cannot by itself distinguish a persistent sidewalk edge from a persistent lane marking.",
             "A selected image lane can still have too few valid points after metric IPM.",
             "Inspect original_frames and all_candidates before accepting a segment.",
             "No missing second lane is interpolated or synthesized by this scanner.",
@@ -709,11 +872,15 @@ def main() -> None:
         "selection": (
             "outermost candidates ordered by bottom image x"
             if args.candidate_selection_mode == "outermost"
-            else "nearest bottom-x candidate on each side of calibrated P2 cx"
+            else (
+                "nearest bottom-x candidate on each side of calibrated P2 cx"
+                if args.candidate_selection_mode == "ego_adjacent"
+                else "pose-associated ego-left/ego-right project tracks"
+            )
         ),
         "frames": point_records,
         "warning": (
-            "Geometrically selected candidates are not guaranteed to be painted lane markings."
+            "Geometrically or temporally selected candidates are not guaranteed to be painted lane markings."
         ),
     }
     (args.output_dir / "selected_lane_points.json").write_text(
