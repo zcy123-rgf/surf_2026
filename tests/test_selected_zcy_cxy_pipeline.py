@@ -125,3 +125,5 @@ def test_windows_runner_contains_both_independent_tasks() -> None:
     assert "temporal_ego" in text
     assert "evaluate_semantickitti_curve_reference.py" in text
     assert "previous_outputs_modified" in text
+    assert "| Out-Host" in text
+    assert (ROOT / "scripts" / "finalize_selected_zcy_cxy_run.ps1").is_file()

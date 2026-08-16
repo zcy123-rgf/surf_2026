@@ -67,7 +67,9 @@ function Invoke-CondaPython {
     param([string]$Label, [string[]]$PythonArgs)
     Write-Host ""
     Write-Host "[$Label]"
-    & conda run --no-capture-output -n $EnvName python @PythonArgs
+    # Out-Host keeps progress visible without returning every Python stdout line
+    # as function data when Invoke-SelectedWindow is assigned to $Rows.
+    & conda run --no-capture-output -n $EnvName python @PythonArgs | Out-Host
     if ($LASTEXITCODE -ne 0) {
         throw "$Label failed with exit code $LASTEXITCODE."
     }
@@ -262,6 +264,11 @@ foreach ($Window in $Windows) {
     }
 }
 
+$Rows = @(
+    $Rows | Where-Object {
+        $null -ne $_ -and $null -ne $_.PSObject.Properties["status"]
+    }
+)
 $Rows | Export-Csv -LiteralPath (Join-Path $OutputRoot "BATCH_SUMMARY.csv") `
     -NoTypeInformation -Encoding UTF8
 $Complete = @($Rows | Where-Object status -eq "complete").Count
