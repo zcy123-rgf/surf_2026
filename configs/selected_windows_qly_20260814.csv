@@ -1,0 +1,3 @@
+priority,purpose,sequence,start_frame,end_frame,frame_count,scene_requirement
+1,primary,07,415,514,100,straight_curve_straight
+2,backup,03,29,128,100,straight_curve_straight
