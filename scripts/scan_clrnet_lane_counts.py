@@ -3,9 +3,11 @@
 This scanner performs live inference but does not invent a missing lane.  It
 can preserve the legacy outermost-candidate policy, select the nearest
 candidate on each side of the calibrated camera centre, or temporally associate
-the ego-adjacent pair using KITTI poses.  Temporal track IDs are created by this
-project; CLRNet itself does not output a persistent lane identity.  Frames
-without a gated candidate on both sides are marked invalid.
+the ego-adjacent pair using KITTI poses.  ``temporal_joint`` keeps the initial
+ego-adjacent identity but subsequently scores every ordered pair jointly, so a
+sharp bend is not rejected merely because both visible boundaries fall on the
+same side of the image principal point.  Temporal track IDs are created by this
+project; CLRNet itself does not output a persistent lane identity.
 """
 
 from __future__ import annotations
@@ -243,6 +245,99 @@ def select_temporal_candidate_pair(
         [item[2] for item in chosen],
         "matched_project_lane_tracks_with_pose",
         costs,
+    )
+
+
+def select_temporal_joint_candidate_pair(
+    lanes: list[np.ndarray],
+    candidate_ground_lanes: list[np.ndarray],
+    image_center_x: float,
+    previous_ground_lanes: list[np.ndarray] | None,
+    previous_pose: np.ndarray | None,
+    current_pose: np.ndarray,
+    camera_height: float,
+    pitch_deg: float,
+    maximum_match_cost_m: float,
+) -> tuple[
+    list[int],
+    list[np.ndarray],
+    list[np.ndarray],
+    str,
+    list[float | None],
+]:
+    """Jointly associate two ordered lane tracks across a sharp image-space bend.
+
+    The first valid frame is initialized by the conservative ego-adjacent rule.
+    Afterwards, every distinct pair whose bottom-x order is left-to-right is
+    tested against the two pose-predicted tracks.  Both individual distances
+    must pass the registered metric gate.
+    """
+
+    if len(lanes) != len(candidate_ground_lanes):
+        raise ValueError("Image and metric candidate lists must have equal length.")
+    indexed = [
+        (index, lane, candidate_ground_lanes[index], bottom_x(lane))
+        for index, lane in enumerate(lanes)
+        if len(candidate_ground_lanes[index]) >= 2
+    ]
+    if len(indexed) < 2:
+        return [], [], [], "fewer_than_two_metric_candidates", [None, None]
+
+    if previous_ground_lanes is None or previous_pose is None:
+        selected_indices, selected_lanes, reason = select_candidate_pair(
+            lanes, mode="ego_adjacent", image_center_x=image_center_x
+        )
+        if len(selected_indices) != 2:
+            return [], [], [], f"temporal_joint_initialization_{reason}", [None, None]
+        return (
+            selected_indices,
+            selected_lanes,
+            [candidate_ground_lanes[index] for index in selected_indices],
+            "initialized_temporal_joint_tracks_from_ego_adjacent_pair",
+            [None, None],
+        )
+
+    predicted = [
+        transform_lane_points_by_pose(
+            previous_ground_lanes[side_index],
+            previous_pose,
+            current_pose,
+            camera_height=camera_height,
+            pitch_deg=pitch_deg,
+        )
+        for side_index in range(2)
+    ]
+    scored_pairs = []
+    for left in indexed:
+        for right in indexed:
+            if left[0] == right[0] or left[3] >= right[3]:
+                continue
+            costs = [
+                symmetric_curve_distance_m(predicted[0], left[2]),
+                symmetric_curve_distance_m(predicted[1], right[2]),
+            ]
+            scored_pairs.append((max(costs), sum(costs), costs, left, right))
+    if not scored_pairs:
+        return [], [], [], "no_distinct_left_to_right_candidate_pair", [None, None]
+
+    _, _, costs, left, right = min(scored_pairs, key=lambda item: (item[0], item[1]))
+    if any(not np.isfinite(cost) for cost in costs):
+        return [], [], [], "temporal_joint_non_finite_distance", [float(cost) for cost in costs]
+    if max(costs) > maximum_match_cost_m:
+        return (
+            [],
+            [],
+            [],
+            "temporal_joint_distance_gate_failed",
+            [float(cost) for cost in costs],
+        )
+    chosen = [left, right]
+    return (
+        [int(item[0]) for item in chosen],
+        [item[1] for item in chosen],
+        [item[2] for item in chosen],
+        "matched_joint_ordered_project_lane_tracks_with_pose",
+        [float(cost) for cost in costs],
     )
 
 
@@ -554,12 +649,13 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--minimum-candidates", type=int, default=2)
     parser.add_argument(
         "--candidate-selection-mode",
-        choices=("outermost", "ego_adjacent", "temporal_ego"),
+        choices=("outermost", "ego_adjacent", "temporal_ego", "temporal_joint"),
         default="outermost",
         help=(
             "outermost preserves the reviewed legacy result; ego_adjacent "
             "selects the bottom-x candidate nearest to each side of P2 cx; "
-            "temporal_ego adds pose-based association and project-created track IDs"
+            "temporal_ego adds pose-based side-split association; temporal_joint "
+            "jointly matches an ordered pair after pose prediction"
         ),
     )
     parser.add_argument("--temporal-maximum-match-cost-m", type=float, default=1.50)
@@ -677,14 +773,19 @@ def main() -> None:
             previous_temporal_frame = None
             temporal_track_generation += 1
         if len(lanes) >= args.minimum_candidates:
-            if args.candidate_selection_mode == "temporal_ego":
+            if args.candidate_selection_mode in ("temporal_ego", "temporal_joint"):
+                selector = (
+                    select_temporal_candidate_pair
+                    if args.candidate_selection_mode == "temporal_ego"
+                    else select_temporal_joint_candidate_pair
+                )
                 (
                     selected_indices,
                     selected_lanes,
                     selected_ground_lanes,
                     pair_reason,
                     temporal_match_costs,
-                ) = select_temporal_candidate_pair(
+                ) = selector(
                     lanes,
                     candidate_ground_lanes,
                     image_center_x=image_center_x,
@@ -718,7 +819,7 @@ def main() -> None:
             and min(projected_counts) >= args.minimum_bev_points_per_side
         )
         ground_lanes[frame_id] = selected_ground_lanes
-        if args.candidate_selection_mode == "temporal_ego" and metric_gate:
+        if args.candidate_selection_mode in ("temporal_ego", "temporal_joint") and metric_gate:
             previous_temporal_ground = selected_ground_lanes
             previous_temporal_pose = poses_image[frame_id]
             previous_temporal_frame = frame_id
@@ -727,7 +828,7 @@ def main() -> None:
                 f"ego_left_{temporal_track_generation:03d}",
                 f"ego_right_{temporal_track_generation:03d}",
             ]
-            if args.candidate_selection_mode == "temporal_ego" and metric_gate
+            if args.candidate_selection_mode in ("temporal_ego", "temporal_joint") and metric_gate
             else []
         )
         point_records.append(
@@ -845,7 +946,8 @@ def main() -> None:
         "warnings": [
             "Candidate count does not prove left/right lane-boundary identity.",
             "ego_adjacent is a geometric pairing rule, not a semantic proof that a candidate is painted lane marking.",
-            "temporal_ego track IDs are created by this project and are not CLRNet or KITTI map lane IDs.",
+            "Temporal track IDs are created by this project and are not CLRNet or KITTI map lane IDs.",
+            "temporal_joint relaxes only the per-frame principal-point split; it still requires two distinct ordered candidates and a metric pose gate.",
             "Pose continuity cannot by itself distinguish a persistent sidewalk edge from a persistent lane marking.",
             "A selected image lane can still have too few valid points after metric IPM.",
             "Inspect original_frames and all_candidates before accepting a segment.",
@@ -875,7 +977,11 @@ def main() -> None:
             else (
                 "nearest bottom-x candidate on each side of calibrated P2 cx"
                 if args.candidate_selection_mode == "ego_adjacent"
-                else "pose-associated ego-left/ego-right project tracks"
+                else (
+                    "pose-associated ego-left/ego-right project tracks with image-centre side pools"
+                    if args.candidate_selection_mode == "temporal_ego"
+                    else "pose-associated jointly matched ordered ego-left/ego-right project tracks"
+                )
             )
         ),
         "frames": point_records,

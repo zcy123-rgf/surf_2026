@@ -127,3 +127,18 @@ def test_windows_runner_contains_both_independent_tasks() -> None:
     assert "previous_outputs_modified" in text
     assert "| Out-Host" in text
     assert (ROOT / "scripts" / "finalize_selected_zcy_cxy_run.ps1").is_file()
+
+
+def test_curved_improvement_runner_keeps_baselines_and_new_methods() -> None:
+    text = (ROOT / "scripts" / "run_curved_improvement_windows.ps1").read_text(
+        encoding="utf-8-sig"
+    )
+    assert '"ego_adjacent"' in text
+    assert '"temporal_ego"' in text
+    assert '"temporal_joint"' in text
+    assert "fit_extended_polynomial.py" in text
+    assert "fit_extended_bspline.py" in text
+    assert "fit_coupled_bspline.py" in text
+    assert "summarize_curved_improvement.py" in text
+    assert "previous_outputs_modified" in text
+    assert "| Out-Host" in text

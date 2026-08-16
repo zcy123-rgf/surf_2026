@@ -40,6 +40,12 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--ego-json", type=Path, required=True)
     parser.add_argument("--temporal-json", type=Path, required=True)
+    parser.add_argument(
+        "--comparison-name",
+        choices=("temporal_ego", "temporal_joint"),
+        default="temporal_ego",
+        help="Name of the method stored in --temporal-json.",
+    )
     parser.add_argument("--poses", type=Path, required=True)
     parser.add_argument("--calib", type=Path, required=True)
     parser.add_argument("--output-dir", type=Path, required=True)
@@ -199,6 +205,7 @@ def disagreement_rows(
             "frame_id": frame_id,
             "ego_valid": first is not None,
             "temporal_valid": second is not None,
+            "comparison_valid": second is not None,
             "both_valid": first is not None and second is not None,
         }
         if first is not None and second is not None:
@@ -244,6 +251,7 @@ def write_image(path: Path, image: np.ndarray) -> None:
 def comparison_overlays(
     ego_json: Path,
     temporal_json: Path,
+    comparison_name: str,
     rows: list[dict[str, object]],
     output_dir: Path,
     maximum_count: int,
@@ -274,8 +282,8 @@ def comparison_overlays(
         cv2.putText(canvas, "ego_adjacent", (15, 28), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 0, 0), 3)
         cv2.putText(canvas, "ego_adjacent", (15, 28), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (255, 255, 255), 1)
         offset = ego_image.shape[1] + 15
-        cv2.putText(canvas, "temporal_ego", (offset, 28), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 0, 0), 3)
-        cv2.putText(canvas, "temporal_ego", (offset, 28), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (255, 255, 255), 1)
+        cv2.putText(canvas, comparison_name, (offset, 28), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 0, 0), 3)
+        cv2.putText(canvas, comparison_name, (offset, 28), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (255, 255, 255), 1)
         write_image(output_dir / f"frame_{frame_id:06d}.png", canvas)
         exported.append(frame_id)
     return exported
@@ -283,7 +291,9 @@ def comparison_overlays(
 
 def plot_continuity(path: Path, rows: list[dict[str, object]], threshold: float) -> None:
     figure, axis = plt.subplots(figsize=(10.5, 4.6))
-    for method, color in (("ego_adjacent", "#555555"), ("temporal_ego", "#1f77b4")):
+    methods = list(dict.fromkeys(str(row["method"]) for row in rows))
+    palette = ("#555555", "#1f77b4", "#2ca02c")
+    for method, color in zip(methods, palette):
         selected = [row for row in rows if row["method"] == method]
         axis.plot(
             [row["frame_id"] for row in selected],
@@ -318,7 +328,7 @@ def main() -> None:
 
     all_continuity = []
     summaries = []
-    for method, records in (("ego_adjacent", ego), ("temporal_ego", temporal)):
+    for method, records in (("ego_adjacent", ego), (args.comparison_name, temporal)):
         rows = continuity_rows(
             method, records, poses, args.camera_height, args.pitch_deg,
             args.continuity_threshold_m,
@@ -327,7 +337,7 @@ def main() -> None:
         summaries.append(summarize_mode(method, records, rows))
     disagreements = disagreement_rows(ego, temporal, args.continuity_threshold_m)
     exported = comparison_overlays(
-        args.ego_json, args.temporal_json, disagreements,
+        args.ego_json, args.temporal_json, args.comparison_name, disagreements,
         args.output_dir / "03_method_overlays", args.maximum_overlay_count,
     )
     write_csv(args.output_dir / "01_metrics" / "mode_summary.csv", summaries)
@@ -349,6 +359,14 @@ def main() -> None:
         "frame_range": [min(ego), max(ego)],
         "mode_summaries": summaries,
         "comparison": {
+            "comparison_name": args.comparison_name,
+            "comparison_minus_ego_valid_rate": (
+                temporal_summary["valid_two_lane_rate"] - ego_summary["valid_two_lane_rate"]
+            ),
+            "comparison_minus_ego_continuity_p90_m": (
+                None if temporal_summary["continuity_p90_m"] is None or ego_summary["continuity_p90_m"] is None
+                else temporal_summary["continuity_p90_m"] - ego_summary["continuity_p90_m"]
+            ),
             "temporal_minus_ego_valid_rate": (
                 temporal_summary["valid_two_lane_rate"] - ego_summary["valid_two_lane_rate"]
             ),
@@ -362,7 +380,7 @@ def main() -> None:
             "exported_overlay_frames": exported,
         },
         "interpretation_rule": (
-            "Prefer temporal_ego only when it reduces pose-aligned continuity error "
+            f"Prefer {args.comparison_name} only when it reduces pose-aligned continuity error "
             "without an unacceptable valid-frame loss; inspect exported disagreements."
         ),
         "warnings": [
@@ -379,7 +397,7 @@ def main() -> None:
     (args.output_dir / "README.md").write_text(
         "# Lane identity mode comparison\n\n"
         "This output compares frame-local `ego_adjacent` with project-created "
-        "pose-temporal `temporal_ego`. It measures continuity, not semantic truth.\n",
+        f"pose-temporal `{args.comparison_name}`. It measures continuity, not semantic truth.\n",
         encoding="utf-8",
     )
     print(json.dumps({"status": "complete", "output_dir": str(args.output_dir.resolve())}, ensure_ascii=False))
