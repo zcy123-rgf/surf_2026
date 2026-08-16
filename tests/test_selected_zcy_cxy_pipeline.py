@@ -142,3 +142,14 @@ def test_curved_improvement_runner_keeps_baselines_and_new_methods() -> None:
     assert "summarize_curved_improvement.py" in text
     assert "previous_outputs_modified" in text
     assert "| Out-Host" in text
+
+
+def test_piecewise_retry_reuses_existing_points_without_rerunning_clrnet() -> None:
+    text = (ROOT / "scripts" / "run_piecewise_retry_windows.ps1").read_text(
+        encoding="utf-8-sig"
+    )
+    assert "ExistingRunRoot" in text
+    assert "diagnose_curved_scan_failures.py" in text
+    assert "fit_piecewise_bspline.py" in text
+    assert "scan_clrnet_lane_counts.py" not in text
+    assert "previous_outputs_modified" in text
