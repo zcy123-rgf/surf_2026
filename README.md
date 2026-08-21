@@ -17,6 +17,9 @@ KITTI image + calib + pose
 本版本暂不使用 Frenet、B-spline 或 StreamMapNet。窗口的直道/过渡/弯道标签仍然保存，
 但只作道路形态诊断，不切换模型。`q` 只是点的顺序参数，所有几何输出仍是米制 X/Z。
 
+CLRNet 运行需要额外的 `addict` 依赖；首次配置工作站环境时执行
+`python -m pip install -r requirements.txt`。
+
 ## 目录作用
 
 - `scripts/scan_lane_tracks.py`：运行 CLRNet，并用 pose 独立维护左右项目轨迹。
