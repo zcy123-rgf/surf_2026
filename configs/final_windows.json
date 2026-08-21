@@ -1,0 +1,22 @@
+{
+  "primary": {
+    "sequence_id": "01",
+    "start_frame": 857,
+    "end_frame": 961,
+    "window_length": 15,
+    "window_stride": 10,
+    "polynomial_degree": 2,
+    "minimum_valid_frames_per_side": 8,
+    "maximum_missing_run_frames": 3
+  },
+  "secondary": {
+    "sequence_id": "09",
+    "start_frame": 51,
+    "end_frame": 155,
+    "window_length": 15,
+    "window_stride": 10,
+    "polynomial_degree": 2,
+    "minimum_valid_frames_per_side": 8,
+    "maximum_missing_run_frames": 3
+  }
+}
