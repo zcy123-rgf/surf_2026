@@ -249,7 +249,9 @@ def windows(start: int, end: int, length: int, stride: int) -> list[tuple[int, i
         return []
     starts = list(range(start, end - length + 2, stride))
     terminal = end - length + 1
-    if starts[-1] != terminal and terminal - starts[-1] >= stride:
+    # Match the fitting stage exactly: always add a terminal anchor when the
+    # regular stride does not land on the requested final frame.
+    if starts[-1] != terminal:
         starts.append(terminal)
     return [(value, value + length - 1) for value in starts]
 

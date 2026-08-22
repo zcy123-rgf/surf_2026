@@ -65,3 +65,11 @@ def test_window_layout_covers_registered_range() -> None:
     assert result[0] == (851, 865)
     assert result[-1] == (991, 1005)
     assert len(result) == 15
+
+
+def test_window_layout_adds_terminal_anchor_for_non_stride_aligned_range() -> None:
+    result = CURVATURE.windows(415, 514, 15, 10)
+    assert result[0] == (415, 429)
+    assert result[-2] == (495, 509)
+    assert result[-1] == (500, 514)
+    assert len(result) == 10
