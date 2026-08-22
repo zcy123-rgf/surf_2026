@@ -234,9 +234,9 @@ Windows工作站Python依赖版本清单。当前工作站继续使用已经验�
 
 - `01_lane_detection_and_tracking/`：CLRNet候选、左右关联和点数据；
 - `02_pose_curvature/`：逐帧曲率、阈值、直道/过渡/弯道分段和图；
-- `03_curve_models_and_fusion/`：模型比较、留出误差、窗口曲线、接口和融合结果；
-- `04_occlusion_hypotheses/`：缺口审计及可选虚线假设；
-- `05_review_bundle/`：便于上传核验的小结果包；
+- `03_curve_models_and_fusion/`：模型比较、留出误差、窗口曲线、接口和融合结果；其中`blended_lane_nodes.csv`是只包含观测支持的融合曲线采样点；
+- `04_occlusion_hypotheses/`：缺口审计及可选虚线假设；其中`final_lane_nodes_with_hypotheses.csv`同时保存观测点和通过门限的低置信度补齐点，并保留来源、置信度字段；
+- `05_review_bundle/`：便于上传核验的小结果包，同时包含上述两份最终坐标CSV；
 - `FINAL_STATUS.json`：完成状态和限制；
 - `FINAL_METRICS.json`：覆盖率、模型选择、接口通过率和桥接统计；
 - `final_seq...review_bundle.zip`：上传和汇报整理用压缩包。

@@ -37,6 +37,8 @@ def test_final_window_exports_auditable_metrics() -> None:
         "selected_model_counts",
         "continuity",
         "bridge_audit",
+        "blended_lane_nodes.csv",
+        "final_lane_nodes_with_hypotheses.csv",
         "not real-world lane accuracy",
     ):
         assert token in runner

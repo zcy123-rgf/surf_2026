@@ -282,11 +282,13 @@ $Files = @(
     (Join-Path $AdaptiveDir "model_comparison.csv"),
     (Join-Path $AdaptiveDir "window_continuity.csv"),
     (Join-Path $AdaptiveDir "output_segments.csv"),
+    (Join-Path $AdaptiveDir "blended_lane_nodes.csv"),
     (Join-Path $AdaptiveDir "skipped_items.csv"),
     (Join-Path $AdaptiveDir "adaptive_piecewise_xz_overview.png"),
     (Join-Path $BridgeDir "BRIDGE_RESULT.json"),
     (Join-Path $BridgeDir "occlusion_bridge_diagnostics.csv"),
     (Join-Path $BridgeDir "occlusion_bridge_nodes.csv"),
+    (Join-Path $BridgeDir "final_lane_nodes_with_hypotheses.csv"),
     (Join-Path $BridgeDir "occlusion_bridge_overview.png")
 )
 foreach ($File in $Files) {
