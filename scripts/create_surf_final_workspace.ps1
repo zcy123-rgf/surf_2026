@@ -50,7 +50,7 @@ function Copy-CleanDirectory {
     New-Item -ItemType Directory -Force -Path $Target | Out-Null
     & robocopy $Source $Target /E /R:1 /W:1 /NFL /NDL /NJH /NJS /NP `
         /XD .git __pycache__ .pytest_cache .runtime workstation_outputs `
-        /XF *.pyc *.pyo
+        /XF .git *.pyc *.pyo
     if ($LASTEXITCODE -gt 7) {
         throw "robocopy failed for $Source with exit code $LASTEXITCODE."
     }
@@ -100,13 +100,19 @@ Copy-CleanDirectory `
 New-Item -ItemType Directory -Path (Join-Path $Destination "workstation_outputs") |
     Out-Null
 
-$Commit = "not_available"
-if (Get-Command git -ErrorAction SilentlyContinue) {
+$Commit = "archive_without_git_metadata"
+if (
+    (Get-Command git -ErrorAction SilentlyContinue) -and
+    (Test-Path -LiteralPath (Join-Path $SourceRoot ".git"))
+) {
     $CommitValue = & git -C $SourceRoot rev-parse HEAD 2>$null
     if ($LASTEXITCODE -eq 0) { $Commit = [string]$CommitValue }
 }
 $ClrnetCommit = "runtime_copy_with_windows_compatibility"
-if (Get-Command git -ErrorAction SilentlyContinue) {
+if (
+    (Get-Command git -ErrorAction SilentlyContinue) -and
+    (Test-Path -LiteralPath (Join-Path $ClrnetSource ".git"))
+) {
     $ClrnetCommitValue = & git -C $ClrnetSource rev-parse HEAD 2>$null
     if ($LASTEXITCODE -eq 0) { $ClrnetCommit = [string]$ClrnetCommitValue }
 }
