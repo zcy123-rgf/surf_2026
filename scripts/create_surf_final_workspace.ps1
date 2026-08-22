@@ -87,7 +87,9 @@ $FinalScripts = @(
     "scripts\bridge_occluded_lane_segments.py",
     "scripts\run_surf_final_window_windows.ps1",
     "scripts\run_surf_final_sequence01_windows.ps1",
-    "scripts\run_surf_final_sequence01_full_windows.ps1"
+    "scripts\run_surf_final_sequence01_full_windows.ps1",
+    "scripts\run_surf_final_all_sequences_windows.ps1",
+    "scripts\summarize_surf_final_all_sequences.py"
 )
 $RansacBaselineScripts = @(
     "scripts\kitti00_workstation_input.ps1",
@@ -158,7 +160,7 @@ $Manifest = [ordered]@{
     clrnet_policy = "separate runtime directory; final pipeline imports but does not edit it"
     contents = @(
         "final pose-curvature and adaptive X/Z lane pipeline",
-        "fixed Sequence 01 segment and full-sequence release entrypoints",
+        "fixed Sequence 01 and resumable Sequence 00-10 full-dataset entrypoints",
         "five-frame improved-RANSAC baseline retained for comparison",
         "external CLRNet Windows runtime and weights",
         "empty workstation_outputs directory",

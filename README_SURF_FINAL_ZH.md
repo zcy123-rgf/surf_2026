@@ -82,6 +82,12 @@ CLRNet 每帧输出若干候选车道曲线；程序将每条候选采样为有�
 
 全Sequence 01规模实验入口，处理0–1100共1101帧。仍使用经过核验的两段直道种子标定阈值；直道固定多项式，过渡和弯道比较多项式与B样条。该实验用于检查规模、覆盖和稳定性，不是官方准确率评测。
 
+#### `run_surf_final_all_sequences_windows.ps1`
+
+Sequence 00–10全量批处理入口，共覆盖23,201帧。每个Sequence使用独立目录，单个失败不会中断后续任务；再次运行时会复用帧范围完全相同且状态完整的既有结果，因此不会重复计算已完成的Sequence 01。每处理完一个Sequence都会刷新`BATCH_SUMMARY.csv`和`BATCH_STATUS.json`，意外中断后可指定原`-OutputRoot`继续。
+
+目前只有Sequence 01登记了人工核验的直道种子；其他Sequence使用低曲率四分位自动基线，汇总表会保留`threshold_baseline`字段。全量结果用于覆盖率、稳定性和可扩展性统计，不作为官方车道定位准确率。
+
 #### `run_surf_final_window_windows.ps1`
 
 通用单路段总控脚本。依次执行车道检测/关联、曲率分类、分窗口模型拟合与融合、缺口审计，并生成`FINAL_STATUS.json`、`FINAL_METRICS.json`和review ZIP。
@@ -229,6 +235,20 @@ Windows工作站Python依赖版本清单。当前工作站继续使用已经验�
 ```
 
 全序列会运行1101次CLRNet推理，时间明显长于155帧。运行期间看到`torch.load FutureWarning`不代表失败；应以最后的`SURF FULL SEQUENCE 01 EXPERIMENT FINISHED`和输出目录中的状态JSON为准。
+
+### Sequence 00–10全量运行
+
+```powershell
+Set-Location F:\surf_final
+Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass
+
+& .\scripts\run_surf_final_all_sequences_windows.ps1 `
+  -EnvName "surf2026-win" `
+  -DatasetRoot "F:\BaiduNetdiskDownload\kitti\odometry" `
+  -Device cuda
+```
+
+默认约处理23,201帧，所需时间远长于单个Sequence。脚本会复用已完成的Sequence 01，并在每个Sequence结束后写入批量进度。运行中断时，从控制台记录输出根目录，然后增加`-OutputRoot "该目录"`重新执行即可继续；只有明确需要全部重算时才加`-ForceRerun`。
 
 ## 8. 每次结果目录
 
