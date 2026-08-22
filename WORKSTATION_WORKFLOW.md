@@ -73,7 +73,26 @@ Every run creates a new timestamped directory with:
 
 Never overwrite an older run while comparing results.
 
-## 5. Extension audit
+## 5. All available pose-curvature sequences
+
+Before running CLRNet on every sequence, run the pose-only diagnostic. It
+automatically discovers every numeric pose file that exists (normally KITTI
+Odometry `00` through `10`) and writes one folder per sequence plus a combined
+CSV, JSON, and overview figure:
+
+```powershell
+Set-Location F:\surf_complete
+python .\scripts\run_all_pose_curvature.py `
+  --poses-root "F:\BaiduNetdiskDownload\kitti\odometry\data_odometry_poses\dataset\poses" `
+  --output-root ".\workstation_outputs\all_pose_curvature_$(Get-Date -Format yyyyMMdd_HHmmss)" `
+  --smoothing-window 11
+```
+
+This step needs only the pose files; it does not load images or CLRNet. Review
+`all_sequences_summary.csv` and `all_sequences_curvature_overview.png` before
+choosing turning intervals for the more expensive lane-detection pipeline.
+
+## 6. Extension audit
 
 The proposed wider Sequence 01 range is `851-1005`. Run it only as an audit:
 
@@ -86,7 +105,7 @@ coverage, the curvature plot shows the intended road section, and
 `RESULT.json`/`METRICS.json` show acceptable continuity. Missing turning-frame
 lanes must remain missing; the scanner must not invent them.
 
-## 6. After a code change
+## 7. After a code change
 
 ```powershell
 python -m pytest -q
