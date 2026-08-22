@@ -27,6 +27,7 @@ from typing import Iterable, Sequence
 import matplotlib
 import numpy as np
 from scipy.spatial import cKDTree
+from scipy.signal import savgol_filter
 
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt  # noqa: E402
@@ -117,8 +118,11 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--core-end-frame", type=int)
     parser.add_argument("--window-length", type=int, default=15)
     parser.add_argument("--window-stride", type=int, default=10)
-    parser.add_argument("--straight-max-heading-deg", type=float, default=1.5)
-    parser.add_argument("--curve-min-heading-deg", type=float, default=3.0)
+    parser.add_argument("--straight-max-curvature-1-per-m", type=float, default=0.004)
+    parser.add_argument("--curve-min-curvature-1-per-m", type=float, default=0.005)
+    parser.add_argument("--curvature-persistence-frames", type=int, default=3)
+    parser.add_argument("--curvature-smoothing-window", type=int, default=11)
+    parser.add_argument("--curvature-majority-fraction", type=float, default=0.60)
     parser.add_argument("--polynomial-degree", type=int, default=2)
     parser.add_argument("--bin-size-m", type=float, default=0.50)
     parser.add_argument("--huber-delta-m", type=float, default=0.20)
@@ -205,10 +209,16 @@ def validate_args(args: argparse.Namespace) -> None:
         raise ValueError("core-end-frame must fall inside the requested range.")
     if not 1 <= args.polynomial_degree <= 3:
         raise ValueError("polynomial-degree must be between 1 and 3.")
-    if not 0 <= args.straight_max_heading_deg < args.curve_min_heading_deg:
+    if not 0 < args.straight_max_curvature_1_per_m < args.curve_min_curvature_1_per_m:
         raise ValueError(
-            "Heading thresholds must satisfy 0 <= straight maximum < curve minimum."
+            "Curvature thresholds must satisfy 0 < straight maximum < curve minimum."
         )
+    if args.curvature_persistence_frames < 1:
+        raise ValueError("curvature-persistence-frames must be at least one.")
+    if args.curvature_smoothing_window < 3 or args.curvature_smoothing_window % 2 == 0:
+        raise ValueError("curvature-smoothing-window must be an odd number >=3.")
+    if not 0.5 <= args.curvature_majority_fraction <= 1.0:
+        raise ValueError("curvature-majority-fraction must be in [0.5, 1.0].")
     if min(
         args.bin_size_m,
         args.huber_delta_m,
@@ -304,17 +314,86 @@ def trajectory_turn_statistics(points_xz: np.ndarray) -> dict[str, float]:
     }
 
 
-def classify_window(
-    trajectory_net_heading_change_deg: float,
-    straight_max_heading_deg: float,
-    curve_min_heading_deg: float,
-) -> str:
-    value = abs(float(trajectory_net_heading_change_deg))
-    if value <= straight_max_heading_deg:
-        return "straight"
-    if value >= curve_min_heading_deg:
-        return "curve"
-    return "transition"
+def absolute_pose_curvature(points_xz: np.ndarray, smoothing_window: int) -> np.ndarray:
+    """Compute smoothed planar absolute curvature for an ordered pose path."""
+
+    points = np.asarray(points_xz, dtype=np.float64).reshape(-1, 2)
+    if len(points) < 3:
+        return np.zeros(len(points), dtype=np.float64)
+    steps = np.linalg.norm(np.diff(points, axis=0), axis=1)
+    arc = np.concatenate([[0.0], np.cumsum(steps)])
+    valid = np.diff(arc) > 1e-8
+    if not np.all(valid):
+        keep = np.concatenate([[True], valid])
+        points = points[keep]
+        steps = np.linalg.norm(np.diff(points, axis=0), axis=1)
+        arc = np.concatenate([[0.0], np.cumsum(steps)])
+    if len(points) < 3 or np.any(np.diff(arc) <= 1e-8):
+        return np.zeros(len(points_xz), dtype=np.float64)
+    window = min(smoothing_window, len(points) if len(points) % 2 else len(points) - 1)
+    if window >= 3:
+        x = savgol_filter(points[:, 0], window, 2, mode="interp")
+        z = savgol_filter(points[:, 1], window, 2, mode="interp")
+    else:
+        x, z = points[:, 0], points[:, 1]
+    dx = np.gradient(x, arc)
+    dz = np.gradient(z, arc)
+    ddx = np.gradient(dx, arc)
+    ddz = np.gradient(dz, arc)
+    speed_sq = np.maximum(dx * dx + dz * dz, 1e-12)
+    curvature = np.abs((dx * ddz - dz * ddx) / np.power(speed_sq, 1.5))
+    if len(curvature) == len(points_xz):
+        return curvature
+    output = np.zeros(len(points_xz), dtype=np.float64)
+    output[np.flatnonzero(keep)] = curvature
+    return output
+
+
+def persistent_curvature_labels(
+    curvature: np.ndarray,
+    straight_max: float,
+    curve_min: float,
+    persistence_frames: int,
+) -> np.ndarray:
+    """Keep only persistent high/low curvature runs; mark the rest transition."""
+
+    values = np.asarray(curvature, dtype=np.float64)
+    raw = np.full(len(values), "transition", dtype=object)
+    raw[values <= straight_max] = "straight"
+    raw[values >= curve_min] = "curve"
+    labels = np.full(len(values), "transition", dtype=object)
+    start = 0
+    while start < len(raw):
+        end = start + 1
+        while end < len(raw) and raw[end] == raw[start]:
+            end += 1
+        if raw[start] != "transition" and end - start >= persistence_frames:
+            labels[start:end] = raw[start]
+        start = end
+    return labels
+
+
+def classify_curvature_window(
+    curvature: np.ndarray,
+    straight_max: float,
+    curve_min: float,
+    persistence_frames: int,
+    majority_fraction: float,
+) -> tuple[str, dict[str, float]]:
+    labels = persistent_curvature_labels(
+        curvature, straight_max, curve_min, persistence_frames
+    )
+    fractions = {
+        name: float(np.mean(labels == name)) if len(labels) else 0.0
+        for name in ("straight", "curve", "transition")
+    }
+    if fractions["curve"] >= majority_fraction:
+        classification = "curve"
+    elif fractions["straight"] >= majority_fraction:
+        classification = "straight"
+    else:
+        classification = "transition"
+    return classification, fractions
 
 
 def load_selected_frames(
@@ -1087,6 +1166,9 @@ def run(args: argparse.Namespace) -> dict[str, object]:
     route_common = camera_positions_xz(
         poses_image, frame_ids, common_reference
     )
+    route_curvature = absolute_pose_curvature(
+        route_common, args.curvature_smoothing_window
+    )
     route_tree = cKDTree(route_common)
     tangents = route_tangents(route_common)
     windows = build_windows(
@@ -1105,10 +1187,15 @@ def run(args: argparse.Namespace) -> dict[str, object]:
             poses_image, local_frame_ids, spec.reference_frame
         )
         turn = trajectory_turn_statistics(trajectory_local)
-        classification = classify_window(
-            turn["trajectory_net_heading_change_deg"],
-            args.straight_max_heading_deg,
-            args.curve_min_heading_deg,
+        local_start = spec.start_frame - args.start_frame
+        local_end = spec.end_frame - args.start_frame + 1
+        window_curvature = route_curvature[local_start:local_end]
+        classification, curvature_fractions = classify_curvature_window(
+            window_curvature,
+            args.straight_max_curvature_1_per_m,
+            args.curve_min_curvature_1_per_m,
+            args.curvature_persistence_frames,
+            args.curvature_majority_fraction,
         )
         fixed_model = "parametric_polynomial"
         window_row: dict[str, object] = {
@@ -1131,7 +1218,14 @@ def run(args: argparse.Namespace) -> dict[str, object]:
                 )
             ),
             "classification": classification,
-            "classification_value": "absolute robust trajectory net heading change",
+            "classification_value": "persistent absolute pose curvature majority",
+            "curvature_min_1_per_m": float(np.min(window_curvature)),
+            "curvature_median_1_per_m": float(np.median(window_curvature)),
+            "curvature_p90_1_per_m": float(np.percentile(window_curvature, 90)),
+            "curvature_max_1_per_m": float(np.max(window_curvature)),
+            "curvature_straight_frame_fraction": curvature_fractions["straight"],
+            "curvature_curve_frame_fraction": curvature_fractions["curve"],
+            "curvature_transition_frame_fraction": curvature_fractions["transition"],
             "position_step_net_heading_change_deg_diagnostic_only": turn[
                 "net_heading_change_deg"
             ],
@@ -1595,7 +1689,8 @@ def run(args: argparse.Namespace) -> dict[str, object]:
     warnings = [
         "The lane observations come from CLRNet and the configured planar IPM; they are not official lane-boundary ground truth.",
         "Upstream left/right selection is preserved, but a stable project-side label does not prove semantic lane identity.",
-        "Window classes use fixed trajectory-heading thresholds chosen for this experiment; they are not KITTI annotations.",
+        "Window classes use persistent absolute pose curvature thresholds chosen for this experiment; they are not KITTI annotations.",
+        "Pose curvature describes the camera/vehicle trajectory and does not prove painted lane-boundary identity.",
         "Held-out errors measure consistency with omitted CLRNet/IPM observations, not real-world lane-position accuracy.",
         "The camera height, pitch and flat-road projection assumptions remain part of the measurement model.",
         "Curve parameters are dimensionless ordering variables only; all saved geometry is metric Cartesian X/Z.",
@@ -1650,17 +1745,16 @@ def run(args: argparse.Namespace) -> dict[str, object]:
             "maximum_missing_run_frames": args.maximum_missing_run_frames,
         },
         "classification": {
-            "measurement": (
-                "absolute robust trajectory net heading change from early/late "
-                "position baselines inside each window"
-            ),
-            "straight_max_deg_inclusive": args.straight_max_heading_deg,
-            "curve_min_deg_inclusive": args.curve_min_heading_deg,
-            "transition_interval_deg": [
-                args.straight_max_heading_deg,
-                args.curve_min_heading_deg,
+            "measurement": "persistent absolute pose curvature majority inside each window",
+            "straight_max_curvature_1_per_m_inclusive": args.straight_max_curvature_1_per_m,
+            "curve_min_curvature_1_per_m_inclusive": args.curve_min_curvature_1_per_m,
+            "transition_interval_1_per_m": [
+                args.straight_max_curvature_1_per_m,
+                args.curve_min_curvature_1_per_m,
             ],
-            "total_absolute_heading_change_is_diagnostic_only": True,
+            "persistence_frames": args.curvature_persistence_frames,
+            "majority_fraction": args.curvature_majority_fraction,
+            "heading_change_retained_as_diagnostic_only": True,
         },
         "model_policy": {
             "straight": f"robust parametric polynomial, degree {args.polynomial_degree}",

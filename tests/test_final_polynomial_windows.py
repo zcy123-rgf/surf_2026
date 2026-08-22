@@ -55,3 +55,20 @@ def test_pose_curvature_is_near_zero_for_a_straight_trajectory():
     poses[:, 2, 3] = np.arange(20, dtype=np.float64)
     result = CURVATURE.compute_curvature(poses, smoothing_window=5)
     assert float(np.max(result["absolute_curvature_1_per_m"])) < 1e-8
+
+
+def test_curvature_window_uses_persistence_and_majority():
+    values = np.array(
+        [0.001, 0.001, 0.006, 0.006, 0.006, 0.0045, 0.006, 0.006, 0.001, 0.001],
+        dtype=float,
+    )
+    classification, fractions = MODULE.classify_curvature_window(
+        values,
+        straight_max=0.004,
+        curve_min=0.005,
+        persistence_frames=3,
+        majority_fraction=0.60,
+    )
+    assert classification == "transition"
+    assert np.isclose(fractions["curve"], 0.3)
+    assert np.isclose(fractions["straight"], 0.0)

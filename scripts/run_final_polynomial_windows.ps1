@@ -57,6 +57,11 @@ Write-Host "[2/4] Fitting polynomial windows and recording short gaps..."
     --window-length 15 `
     --window-stride 10 `
     --polynomial-degree 2 `
+    --straight-max-curvature-1-per-m 0.004 `
+    --curve-min-curvature-1-per-m 0.005 `
+    --curvature-persistence-frames 3 `
+    --curvature-smoothing-window 11 `
+    --curvature-majority-fraction 0.60 `
     --minimum-valid-frames-per-side 8 `
     --maximum-missing-run-frames 3 `
     --output-dir $fitRoot

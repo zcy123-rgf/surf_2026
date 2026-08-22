@@ -17,9 +17,12 @@ and a plot. This is the road/camera trajectory shape signal used to identify
 straight, transition, and curved portions. It is not derived from CLRNet lane
 pixels.
 
-The polynomial fitter still uses robust net trajectory heading change for its
-window label. The label is diagnostic only; all windows use the same quadratic
-parametric polynomial.
+The polynomial fitter uses this persistent curvature rule for its diagnostic
+window label: `kappa <= 0.004 1/m` is straight, `kappa >= 0.005 1/m` is curve,
+and the interval between them is transition. A label must persist for three
+frames and occupy at least 60% of a 15-frame window. All windows still use the
+same quadratic parametric polynomial; the label does not select a different
+model.
 
 ## Reported metrics
 
