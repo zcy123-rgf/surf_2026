@@ -2,10 +2,12 @@
 
 The input lane observations stay in their native metric ground-plane X/Z
 representation.  Each short window is first aligned to its own KITTI pose,
-then fitted independently on the left and right.  Low-turn windows use a
-robust low-degree parametric polynomial; transition and curve windows use a
-robust parametric cubic B-spline.  The dimensionless parameters used by both
-models only order samples along a curve: the fitted outputs remain X/Z points.
+then fitted independently on the left and right.  Straight windows use a
+robust low-degree parametric polynomial.  Transition and curve windows compare
+that polynomial with a robust parametric cubic B-spline on the same held-out
+frames unless a fixed curve policy is explicitly requested.  The dimensionless
+parameters used by both models only order samples along a curve: the fitted
+outputs remain X/Z points.
 
 Every sampled window curve is transformed to one requested common camera
 reference frame.  Overlapping samples are combined into one polyline per side,
@@ -126,6 +128,13 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--straight-max-heading-deg", type=float, default=1.5)
     parser.add_argument("--curve-min-heading-deg", type=float, default=3.0)
     parser.add_argument("--transition-rmse-tie-m", type=float, default=0.005)
+    parser.add_argument(
+        "--curve-model-policy",
+        choices=("compare", "fixed_bspline"),
+        default="compare",
+    )
+    parser.add_argument("--curve-rmse-tie-m", type=float, default=0.02)
+    parser.add_argument("--curvature-windows-csv", type=Path)
     parser.add_argument("--polynomial-degree", type=int, default=2)
     parser.add_argument("--bin-size-m", type=float, default=0.50)
     parser.add_argument("--smoothing-per-point-m2", type=float, default=0.04)
@@ -200,6 +209,8 @@ def validate_args(args: argparse.Namespace) -> None:
     ]
     if args.scan_json is not None and not args.scan_json.is_file():
         missing.append(str(args.scan_json))
+    if args.curvature_windows_csv is not None and not args.curvature_windows_csv.is_file():
+        missing.append(str(args.curvature_windows_csv))
     if missing:
         raise FileNotFoundError("Missing input files: " + ", ".join(missing))
     if args.start_frame < 0 or args.end_frame < args.start_frame:
@@ -231,8 +242,8 @@ def validate_args(args: argparse.Namespace) -> None:
         args.maximum_internal_node_gap_m,
     ) <= 0:
         raise ValueError("Distance, bin and smoothing parameters must be positive.")
-    if args.transition_rmse_tie_m < 0:
-        raise ValueError("transition-rmse-tie-m cannot be negative.")
+    if args.transition_rmse_tie_m < 0 or args.curve_rmse_tie_m < 0:
+        raise ValueError("Model-comparison RMSE ties cannot be negative.")
     if args.irls_iterations < 1 or args.curve_samples < 30:
         raise ValueError("irls-iterations must be >=1 and curve-samples >=30.")
     if args.minimum_valid_frames_per_side < 2:
@@ -362,6 +373,37 @@ def select_transition_model(
     if spline in available:
         return spline, "transition fallback: polynomial fit unavailable"
     raise ValueError("No transition model is available.")
+
+
+def select_compared_model(
+    metrics_by_model: dict[str, dict[str, float | int]],
+    available_models: Sequence[str],
+    tie_m: float,
+    context: str,
+) -> tuple[str, str]:
+    """Compare models on held-out frames with a registered simplicity tie."""
+
+    selected, reason = select_transition_model(
+        metrics_by_model, available_models, tie_m
+    )
+    return selected, reason.replace("transition", context)
+
+
+def load_curvature_window_classes(
+    path: Path | None,
+) -> dict[tuple[int, int], dict[str, str]]:
+    if path is None:
+        return {}
+    with path.open(encoding="utf-8-sig", newline="") as handle:
+        rows = list(csv.DictReader(handle))
+    required = {"start_frame", "end_frame", "classification"}
+    if rows and not required.issubset(rows[0]):
+        raise ValueError(
+            "Curvature window CSV lacks start_frame/end_frame/classification."
+        )
+    return {
+        (int(row["start_frame"]), int(row["end_frame"])): row for row in rows
+    }
 
 
 def load_selected_frames(
@@ -1217,6 +1259,7 @@ def run(args: argparse.Namespace) -> dict[str, object]:
     windows = build_windows(
         args.start_frame, args.end_frame, args.window_length, args.window_stride
     )
+    curvature_classes = load_curvature_window_classes(args.curvature_windows_csv)
 
     window_results: list[WindowResult] = []
     window_rows: list[dict[str, object]] = []
@@ -1229,16 +1272,31 @@ def run(args: argparse.Namespace) -> dict[str, object]:
             poses_image, local_frame_ids, spec.reference_frame
         )
         turn = trajectory_turn_statistics(trajectory_local)
-        classification = classify_window(
-            turn["trajectory_net_heading_change_deg"],
-            args.straight_max_heading_deg,
-            args.curve_min_heading_deg,
+        curvature_row = curvature_classes.get((spec.start_frame, spec.end_frame))
+        if curvature_classes and curvature_row is None:
+            raise ValueError(
+                "Curvature classification is missing window "
+                f"{spec.start_frame}-{spec.end_frame}."
+            )
+        classification = (
+            str(curvature_row["classification"])
+            if curvature_row is not None
+            else classify_window(
+                turn["trajectory_net_heading_change_deg"],
+                args.straight_max_heading_deg,
+                args.curve_min_heading_deg,
+            )
         )
+        if classification not in {"straight", "curve", "transition"}:
+            raise ValueError(f"Unsupported window classification: {classification}")
         fixed_model = (
             "parametric_polynomial"
             if classification == "straight"
             else (
-                "parametric_cubic_bspline" if classification == "curve" else None
+                "parametric_cubic_bspline"
+                if classification == "curve"
+                and args.curve_model_policy == "fixed_bspline"
+                else None
             )
         )
         window_row: dict[str, object] = {
@@ -1261,7 +1319,16 @@ def run(args: argparse.Namespace) -> dict[str, object]:
                 )
             ),
             "classification": classification,
-            "classification_value": "absolute robust trajectory net heading change",
+            "classification_value": (
+                "pose-derived curvature hysteresis"
+                if curvature_row is not None
+                else "absolute robust trajectory net heading change"
+            ),
+            "median_absolute_curvature_1pm": (
+                float(curvature_row["median_absolute_curvature_1pm"])
+                if curvature_row is not None
+                else float("nan")
+            ),
             "position_step_net_heading_change_deg_diagnostic_only": turn[
                 "net_heading_change_deg"
             ],
@@ -1403,10 +1470,16 @@ def run(args: argparse.Namespace) -> dict[str, object]:
                     else "fixed policy: curve window uses the registered cubic B-spline"
                 )
             else:
-                selected_model, selection_reason = select_transition_model(
+                tie = (
+                    args.curve_rmse_tie_m
+                    if classification == "curve"
+                    else args.transition_rmse_tie_m
+                )
+                selected_model, selection_reason = select_compared_model(
                     heldout_by_model,
                     list(candidate_fits),
-                    args.transition_rmse_tie_m,
+                    tie,
+                    classification,
                 )
             window_row[f"{side}_selected_model"] = selected_model
             window_row[f"{side}_selection_reason"] = selection_reason
@@ -1724,7 +1797,11 @@ def run(args: argparse.Namespace) -> dict[str, object]:
     warnings = [
         "The lane observations come from CLRNet and the configured planar IPM; they are not official lane-boundary ground truth.",
         "Upstream left/right selection is preserved, but a stable project-side label does not prove semantic lane identity.",
-        "Window classes use fixed trajectory-heading thresholds chosen for this experiment; they are not KITTI annotations.",
+        (
+            "Window classes come from the registered pose-curvature audit; they are not KITTI annotations."
+            if args.curvature_windows_csv is not None
+            else "Window classes use fixed trajectory-heading thresholds chosen for this experiment; they are not KITTI annotations."
+        ),
         "Held-out errors measure consistency with omitted CLRNet/IPM observations, not real-world lane-position accuracy.",
         "The camera height, pitch and flat-road projection assumptions remain part of the measurement model.",
         "Curve parameters are dimensionless ordering variables only; all saved geometry is metric Cartesian X/Z.",
@@ -1781,8 +1858,12 @@ def run(args: argparse.Namespace) -> dict[str, object]:
         },
         "classification": {
             "measurement": (
-                "absolute robust trajectory net heading change from early/late "
-                "position baselines inside each window"
+                "pose-derived metric curvature with registered hysteresis"
+                if args.curvature_windows_csv is not None
+                else (
+                    "absolute robust trajectory net heading change from early/late "
+                    "position baselines inside each window"
+                )
             ),
             "straight_max_deg_inclusive": args.straight_max_heading_deg,
             "curve_min_deg_inclusive": args.curve_min_heading_deg,
@@ -1798,7 +1879,14 @@ def run(args: argparse.Namespace) -> dict[str, object]:
                 "lower held-out-frame RMSE per side; robust polynomial wins when "
                 f"within {args.transition_rmse_tie_m:.6f} m of the B-spline"
             ),
-            "curve": "robust parametric cubic B-spline",
+            "curve": (
+                "fixed robust parametric cubic B-spline"
+                if args.curve_model_policy == "fixed_bspline"
+                else (
+                    "lower held-out-frame RMSE per side; robust polynomial wins when "
+                    f"within {args.curve_rmse_tie_m:.6f} m of the B-spline"
+                )
+            ),
             "left_right_are_never_pooled": True,
             "both_models_compared_on_each_fittable_window": True,
         },
@@ -1840,6 +1928,16 @@ def run(args: argparse.Namespace) -> dict[str, object]:
             ),
             "scan_json_sha256": (
                 sha256(args.scan_json) if args.scan_json is not None else None
+            ),
+            "curvature_windows_csv": (
+                str(args.curvature_windows_csv.resolve())
+                if args.curvature_windows_csv is not None
+                else None
+            ),
+            "curvature_windows_csv_sha256": (
+                sha256(args.curvature_windows_csv)
+                if args.curvature_windows_csv is not None
+                else None
             ),
             "poses": str(args.poses.resolve()),
             "poses_sha256": sha256(args.poses),
@@ -1896,7 +1994,11 @@ def run(args: argparse.Namespace) -> dict[str, object]:
                 f"- Common reference frame: {common_reference}",
                 f"- Windows: {len(windows)} ({args.window_length} frames, stride {args.window_stride})",
                 "- Straight windows: robust parametric polynomial in X/Z.",
-                "- Curve windows: robust parametric cubic B-spline in X/Z.",
+                (
+                    "- Curve windows: fixed robust parametric cubic B-spline in X/Z."
+                    if args.curve_model_policy == "fixed_bspline"
+                    else "- Curve windows: polynomial/B-spline selection by held-out-frame RMSE with a registered simplicity tie."
+                ),
                 "- Transition windows: polynomial/B-spline selection by held-out-frame RMSE with a registered simplicity tie.",
                 "- Left and right observations are processed independently.",
                 "- Failed overlap-continuity gates create separate output segments; gaps are not connected for display.",

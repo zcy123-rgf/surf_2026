@@ -18,6 +18,10 @@ param(
     [double]$StraightMaxHeadingDeg = 1.5,
     [double]$CurveMinHeadingDeg = 3.0,
     [double]$TransitionRmseTieM = 0.005,
+    [ValidateSet("compare", "fixed_bspline")]
+    [string]$CurveModelPolicy = "compare",
+    [double]$CurveRmseTieM = 0.02,
+    [string]$CurvatureWindowsCsv = "",
     [double]$ContinuityP95GateM = 0.75,
     [double]$ContinuityAngleGateDeg = 30.0,
     [double]$ContinuityRouteGapGateM = 0.50,
@@ -43,6 +47,9 @@ foreach ($InputPath in @($SelectedLanePoints, $Poses, $Calib)) {
 }
 if ($ScanJson -and -not (Test-Path -LiteralPath $ScanJson -PathType Leaf)) {
     throw "Optional scan JSON is missing: $ScanJson"
+}
+if ($CurvatureWindowsCsv -and -not (Test-Path -LiteralPath $CurvatureWindowsCsv -PathType Leaf)) {
+    throw "Optional curvature window CSV is missing: $CurvatureWindowsCsv"
 }
 if (-not $OutputDir) {
     $Stamp = Get-Date -Format "yyyyMMdd_HHmmss"
@@ -70,6 +77,8 @@ $Arguments = @(
     "--straight-max-heading-deg", [string]$StraightMaxHeadingDeg,
     "--curve-min-heading-deg", [string]$CurveMinHeadingDeg,
     "--transition-rmse-tie-m", [string]$TransitionRmseTieM,
+    "--curve-model-policy", $CurveModelPolicy,
+    "--curve-rmse-tie-m", [string]$CurveRmseTieM,
     "--continuity-p95-gate-m", [string]$ContinuityP95GateM,
     "--continuity-angle-gate-deg", [string]$ContinuityAngleGateDeg,
     "--continuity-route-gap-gate-m", [string]$ContinuityRouteGapGateM,
@@ -85,6 +94,9 @@ if ($ReferenceFrame -ge 0) {
 }
 if ($ScanJson) {
     $Arguments += @("--scan-json", $ScanJson)
+}
+if ($CurvatureWindowsCsv) {
+    $Arguments += @("--curvature-windows-csv", $CurvatureWindowsCsv)
 }
 
 Write-Host "Running adaptive metric X/Z piecewise experiment..."

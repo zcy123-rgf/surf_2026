@@ -146,6 +146,20 @@ def test_transition_selection_uses_heldout_rmse_and_simplicity_tie() -> None:
     assert selected == spline
 
 
+def test_curve_comparison_is_not_hardwired_to_bspline() -> None:
+    polynomial = "parametric_polynomial"
+    spline = "parametric_cubic_bspline"
+    metrics = {
+        polynomial: {"heldout_fold_count": 5, "rmse_m": 0.20},
+        spline: {"heldout_fold_count": 5, "rmse_m": 0.21},
+    }
+    selected, reason = adaptive.select_compared_model(
+        metrics, [polynomial, spline], tie_m=0.02, context="curve"
+    )
+    assert selected == polynomial
+    assert "curve" in reason
+
+
 def dummy_window_result(window_id: int, key_start: float) -> adaptive.WindowResult:
     points = np.column_stack(
         [np.full(20, 1.8), np.linspace(key_start, key_start + 10.0, 20)]
@@ -325,6 +339,9 @@ def test_synthetic_straight_curve_straight_run(tmp_path: Path) -> None:
         straight_max_heading_deg=1.5,
         curve_min_heading_deg=3.0,
         transition_rmse_tie_m=0.005,
+        curve_model_policy="compare",
+        curve_rmse_tie_m=0.02,
+        curvature_windows_csv=None,
         polynomial_degree=2,
         bin_size_m=0.50,
         smoothing_per_point_m2=0.01,
