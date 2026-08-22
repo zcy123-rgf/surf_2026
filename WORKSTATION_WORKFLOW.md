@@ -1,4 +1,4 @@
-# Workstation workflow
+﻿# Workstation workflow
 
 This is the fixed procedure for changing and running the project in
 `F:\surf_complete`.
@@ -76,9 +76,10 @@ Never overwrite an older run while comparing results.
 ## 5. All available pose-curvature sequences
 
 Before running CLRNet on every sequence, run the pose-only diagnostic. It
-automatically discovers every numeric pose file that exists (normally KITTI
-Odometry `00` through `10`) and writes one folder per sequence plus a combined
-CSV, JSON, and overview figure:
+automatically discovers every numeric pose file that exists. KITTI Odometry
+has image sequences `00` through `21`, but the official pose ground truth is
+normally available only for `00` through `10`. It writes one folder per
+available pose sequence plus a combined CSV, JSON, and overview figure:
 
 ```powershell
 Set-Location F:\surf_complete
@@ -117,3 +118,4 @@ git push origin complete_code
 ```
 
 Then return to the workstation and repeat step 1 before running again.
+
