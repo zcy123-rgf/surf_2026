@@ -58,7 +58,8 @@ function Copy-CleanDirectory {
 
 $RootFiles = @(
     "requirements-windows.txt",
-    "SURF_FINAL_PIPELINE_ZH.md"
+    "SURF_FINAL_PIPELINE_ZH.md",
+    "SURF_FINAL_DECISIONS_ZH.md"
 )
 $FinalScripts = @(
     "scripts\kitti_odometry_workstation_input.ps1",
@@ -69,7 +70,8 @@ $FinalScripts = @(
     "scripts\fit_adaptive_xz_piecewise.py",
     "scripts\run_adaptive_xz_piecewise_windows.ps1",
     "scripts\bridge_occluded_lane_segments.py",
-    "scripts\run_surf_final_window_windows.ps1"
+    "scripts\run_surf_final_window_windows.ps1",
+    "scripts\run_surf_final_sequence01_windows.ps1"
 )
 $RansacBaselineScripts = @(
     "scripts\kitti00_workstation_input.ps1",

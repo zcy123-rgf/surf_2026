@@ -177,6 +177,70 @@ $Scan = Get-Content (Join-Path $ScanDir "scan.json") -Raw | ConvertFrom-Json
 $Curvature = Get-Content (Join-Path $CurvatureDir "CURVATURE_RESULT.json") -Raw | ConvertFrom-Json
 $Adaptive = Get-Content (Join-Path $AdaptiveDir "STATUS.json") -Raw | ConvertFrom-Json
 $Bridge = Get-Content (Join-Path $BridgeDir "BRIDGE_RESULT.json") -Raw | ConvertFrom-Json
+$ModelRows = @(Import-Csv (Join-Path $AdaptiveDir "model_comparison.csv"))
+$SelectedModelRows = @(
+    $ModelRows | Where-Object { $_.selected_for_output -eq "True" }
+)
+$SelectedModelCounts = [ordered]@{}
+foreach ($Row in $SelectedModelRows) {
+    $Key = "{0}|{1}" -f $Row.classification, $Row.model
+    if (-not $SelectedModelCounts.Contains($Key)) {
+        $SelectedModelCounts[$Key] = 0
+    }
+    $SelectedModelCounts[$Key] += 1
+}
+$ContinuityRows = @(Import-Csv (Join-Path $AdaptiveDir "window_continuity.csv"))
+$ContinuityPassCount = @(
+    $ContinuityRows | Where-Object { $_.passes_continuity_gate -eq "True" }
+).Count
+$ExpectedWindowSideFits = 2 * [int]$Curvature.counts.windows
+$FrameCount = $EndFrame - $StartFrame + 1
+$Metrics = [ordered]@{
+    status = [string]$Adaptive.status
+    sequence_id = $SequenceId
+    frames = @($StartFrame, $EndFrame)
+    frame_count = $FrameCount
+    coordinate_system = "metric Cartesian common-reference X/Z"
+    curvature_thresholds = $Curvature.thresholds
+    curvature_state_frames = $Curvature.counts.state_frames
+    observation_coverage = [ordered]@{
+        left_count = [int]$Scan.frames_with_left_observation
+        left_fraction = [double]$Scan.frames_with_left_observation / $FrameCount
+        right_count = [int]$Scan.frames_with_right_observation
+        right_fraction = [double]$Scan.frames_with_right_observation / $FrameCount
+        both_count = [int]$Scan.frames_with_selected_pair
+        both_fraction = [double]$Scan.frames_with_selected_pair / $FrameCount
+    }
+    fitting_coverage = [ordered]@{
+        window_count = [int]$Curvature.counts.windows
+        expected_window_side_fits = $ExpectedWindowSideFits
+        completed_window_side_fits = [int]$Adaptive.window_side_fits
+        completed_fraction = if ($ExpectedWindowSideFits -gt 0) {
+            [double]$Adaptive.window_side_fits / $ExpectedWindowSideFits
+        } else { 0.0 }
+    }
+    selected_model_counts = $SelectedModelCounts
+    continuity = [ordered]@{
+        checked_interfaces = $ContinuityRows.Count
+        passed_interfaces = $ContinuityPassCount
+        passed_fraction = if ($ContinuityRows.Count -gt 0) {
+            [double]$ContinuityPassCount / $ContinuityRows.Count
+        } else { 0.0 }
+    }
+    bridge_audit = [ordered]@{
+        candidate_gaps = [int]$Bridge.candidate_gaps
+        accepted_low_confidence_hypotheses = [int]$Bridge.accepted_hypothesis_bridges
+        rejected_gaps = [int]$Bridge.rejected_gaps
+    }
+    interpretation = [ordered]@{
+        curvature = "pose-derived project classification, not a KITTI annotation"
+        held_out_errors = "internal consistency against omitted CLRNet/IPM observations, not real-world lane accuracy"
+        bridges = "dashed low-confidence geometry hypotheses, never detected observations"
+    }
+}
+$MetricsPath = Join-Path $OutputRoot "FINAL_METRICS.json"
+$Metrics | ConvertTo-Json -Depth 12 |
+    Set-Content -LiteralPath $MetricsPath -Encoding UTF8
 $Status = [ordered]@{
     status = [string]$Adaptive.status
     sequence_id = $SequenceId
@@ -204,6 +268,7 @@ $BundleDir = Join-Path $OutputRoot "05_review_bundle"
 New-Item -ItemType Directory -Path $BundleDir | Out-Null
 $Files = @(
     $StatusPath,
+    $MetricsPath,
     (Join-Path $ScanDir "scan.json"),
     (Join-Path $ScanDir "lane_counts.csv"),
     (Join-Path $CurvatureDir "CURVATURE_RESULT.json"),
