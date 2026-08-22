@@ -14,6 +14,7 @@
 - `surf_bev/`：CLRNet 调用、IPM 和位姿坐标变换。
 - `scripts/run_surf_final_window_windows.ps1`：最终长路段一键入口。
 - `scripts/analyze_pose_curvature.py`：由 KITTI pose 计算曲率和直道/过渡/弯道状态。
+- `scripts/run_pose_curvature_all_sequences_windows.ps1`：只读 pose 的 Sequence 00--10 轻量曲率筛查。
 - `scripts/fit_adaptive_xz_piecewise.py`：分窗口拟合、模型比较、连续性检查和融合。
 - `scripts/bridge_occluded_lane_segments.py`：只对通过门限的缺口输出低置信度假设桥。
 - `scripts/run_ransac_improvement_windows.ps1`：保留的最初 0--4 帧改进 RANSAC 对比基线，不是长弯道主入口。
@@ -82,6 +83,16 @@ Set-Location F:\surf_final
 Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass
 ```
 
+先做 Sequence 00--10 的轻量 pose 曲率筛查（不运行 CLRNet）：
+
+```powershell
+& .\scripts\run_pose_curvature_all_sequences_windows.ps1 `
+  -EnvName "surf2026-win" `
+  -DatasetRoot "F:\BaiduNetdiskDownload\kitti\odometry"
+```
+
+该批量输出使用最低曲率四分位后备基线，只用于发现候选路段。重点实验仍按下面的直道种子重新校准。
+
 先运行重点路段 Sequence 01，帧 851--1005：
 
 ```powershell
@@ -132,4 +143,3 @@ Sequence 03 帧 29--128 只作为备用候选。未核验直道种子前不要�
 - StreamMapNet（WACV 2024）：历史 map query 经位姿变换后传播，并结合 BEV temporal fusion；本项目只借鉴“位姿补偿历史几何”思想。<https://openaccess.thecvf.com/content/WACV2024/papers/Yuan_StreamMapNet_Streaming_Mapping_Network_for_Vectorized_Online_HD_Map_Construction_WACV_2024_paper.pdf>
 - B 样条接口研究：相邻曲线若要方向连续，应同时约束连接位置与端点切向，即 G1 连续。<https://academic.oup.com/jcde/article/2/4/218/5715267>
 - 道路几何曲率：直线、圆曲线与缓和曲线可通过曲率为零、近似常数和逐渐变化来区分。<https://www.mdpi.com/1424-8220/19/24/5373>
-

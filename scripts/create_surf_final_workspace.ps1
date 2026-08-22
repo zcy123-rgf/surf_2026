@@ -64,6 +64,7 @@ $FinalScripts = @(
     "scripts\kitti_odometry_workstation_input.ps1",
     "scripts\scan_clrnet_lane_counts.py",
     "scripts\analyze_pose_curvature.py",
+    "scripts\run_pose_curvature_all_sequences_windows.ps1",
     "scripts\fit_first5_two_curves.py",
     "scripts\fit_adaptive_xz_piecewise.py",
     "scripts\run_adaptive_xz_piecewise_windows.ps1",
@@ -138,4 +139,3 @@ Write-Host "SURF FINAL WORKSPACE CREATED"
 Write-Host "Path: $Destination"
 Write-Host "Start here: $(Join-Path $Destination 'SURF_FINAL_PIPELINE_ZH.md')"
 Write-Host "Historical outputs copied: no"
-
