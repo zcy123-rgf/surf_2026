@@ -12,7 +12,8 @@ The destination must be empty so an earlier result can never be mixed in.
 [CmdletBinding()]
 param(
     [string]$Destination = "F:\surf_final",
-    [string]$ClrnetSource = "F:\2026_surf\CLRNet"
+    [string]$ClrnetSource = "F:\2026_surf\CLRNet",
+    [string]$FinalResultSource = ""
 )
 
 $ErrorActionPreference = "Stop"
@@ -22,6 +23,19 @@ if (-not (Test-Path -LiteralPath $ClrnetSource -PathType Container)) {
     throw "The proven Windows CLRNet runtime was not found: $ClrnetSource"
 }
 $ClrnetSource = (Resolve-Path -LiteralPath $ClrnetSource).Path
+
+if (-not [string]::IsNullOrWhiteSpace($FinalResultSource)) {
+    if (-not (Test-Path -LiteralPath $FinalResultSource -PathType Container)) {
+        throw "FinalResultSource does not exist: $FinalResultSource"
+    }
+    $FinalResultSource = (Resolve-Path -LiteralPath $FinalResultSource).Path
+    foreach ($RequiredResult in @("FINAL_STATUS.json", "FINAL_METRICS.json")) {
+        $RequiredResultPath = Join-Path $FinalResultSource $RequiredResult
+        if (-not (Test-Path -LiteralPath $RequiredResultPath -PathType Leaf)) {
+            throw "FinalResultSource is missing $RequiredResult`: $FinalResultSource"
+        }
+    }
+}
 
 if (Test-Path -LiteralPath $Destination) {
     $Existing = @(Get-ChildItem -LiteralPath $Destination -Force)
@@ -58,6 +72,7 @@ function Copy-CleanDirectory {
 
 $RootFiles = @(
     "requirements-windows.txt",
+    "README_SURF_FINAL_ZH.md",
     "SURF_FINAL_PIPELINE_ZH.md",
     "SURF_FINAL_DECISIONS_ZH.md"
 )
@@ -71,7 +86,8 @@ $FinalScripts = @(
     "scripts\run_adaptive_xz_piecewise_windows.ps1",
     "scripts\bridge_occluded_lane_segments.py",
     "scripts\run_surf_final_window_windows.ps1",
-    "scripts\run_surf_final_sequence01_windows.ps1"
+    "scripts\run_surf_final_sequence01_windows.ps1",
+    "scripts\run_surf_final_sequence01_full_windows.ps1"
 )
 $RansacBaselineScripts = @(
     "scripts\kitti00_workstation_input.ps1",
@@ -86,21 +102,35 @@ $RansacBaselineScripts = @(
 $AnnotationFiles = @(
     "annotations\kitti00_first5_manual_annotations.json"
 )
+$SurfBevFiles = @(
+    "surf_bev\__init__.py",
+    "surf_bev\detectors.py",
+    "surf_bev\geometry.py",
+    "surf_bev\optimized_ransac.py",
+    "surf_bev\point_export.py",
+    "surf_bev\temporal_denoise.py"
+)
 
 foreach ($RelativePath in @(
-    $RootFiles + $FinalScripts + $RansacBaselineScripts + $AnnotationFiles
+    $RootFiles + $FinalScripts + $RansacBaselineScripts +
+        $AnnotationFiles + $SurfBevFiles
 )) {
     Copy-RequiredFile $RelativePath
 }
 
 Copy-CleanDirectory `
-    -Source (Join-Path $SourceRoot "surf_bev") `
-    -Target (Join-Path $Destination "surf_bev")
-Copy-CleanDirectory `
     -Source $ClrnetSource `
     -Target (Join-Path $Destination "CLRNet")
 New-Item -ItemType Directory -Path (Join-Path $Destination "workstation_outputs") |
     Out-Null
+New-Item -ItemType Directory -Path (Join-Path $Destination "results") |
+    Out-Null
+
+$ImportedFinalResult = $null
+if (-not [string]::IsNullOrWhiteSpace($FinalResultSource)) {
+    $ImportedFinalResult = Join-Path $Destination "results\sequence01_851_1005_formal"
+    Copy-CleanDirectory -Source $FinalResultSource -Target $ImportedFinalResult
+}
 
 $Commit = "archive_without_git_metadata"
 if (
@@ -128,10 +158,13 @@ $Manifest = [ordered]@{
     clrnet_policy = "separate runtime directory; final pipeline imports but does not edit it"
     contents = @(
         "final pose-curvature and adaptive X/Z lane pipeline",
+        "fixed Sequence 01 segment and full-sequence release entrypoints",
         "five-frame improved-RANSAC baseline retained for comparison",
         "external CLRNet Windows runtime and weights",
-        "empty workstation_outputs directory"
+        "empty workstation_outputs directory",
+        "optional imported reviewed Sequence 01 formal result"
     )
+    imported_final_result = $ImportedFinalResult
     exclusions = @(
         "historical results",
         "development drafts",
