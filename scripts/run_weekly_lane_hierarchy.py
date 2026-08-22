@@ -66,6 +66,55 @@ class ScalarSpline:
         return np.asarray(splev(values, self.tck), dtype=np.float64)
 
 
+@dataclass
+class PiecewiseSparseBlend:
+    """Blend sparse local PCHIP curves only where their supports overlap.
+
+    This preserves the ten local curve representations.  It deliberately does
+    not force all sparse anchors through one global spline, which can oscillate
+    when a long road bends strongly or a lane identity changes between windows.
+    """
+
+    side: str
+    curves: list[tuple[float, float, PchipInterpolator]]
+    s_min: float
+    s_max: float
+
+    def evaluate(self, values: np.ndarray) -> np.ndarray:
+        progress = np.asarray(values, dtype=np.float64)
+        numerator = np.zeros_like(progress)
+        denominator = np.zeros_like(progress)
+        for lower, upper, curve in self.curves:
+            mask = (progress >= lower) & (progress <= upper)
+            if not np.any(mask):
+                continue
+            phase = (progress[mask] - lower) / max(upper - lower, 1e-9)
+            weights = np.sin(np.pi * phase) ** 2
+            numerator[mask] += weights * np.asarray(curve(progress[mask]))
+            denominator[mask] += weights
+
+        missing = denominator <= 1e-12
+        if np.any(missing):
+            # Exact outer endpoints have zero taper weight.  Use the local curve
+            # whose valid support is nearest; interior gaps are rejected below.
+            for index in np.flatnonzero(missing):
+                value = float(progress.flat[index])
+                containing = [
+                    item for item in self.curves if item[0] <= value <= item[1]
+                ]
+                if not containing:
+                    raise ValueError(
+                        f"Sparse local curves have an uncovered interior at s={value:.3f} m."
+                    )
+                selected = min(
+                    containing,
+                    key=lambda item: abs(value - (item[0] + item[1]) / 2.0),
+                )
+                numerator.flat[index] = float(selected[2](value))
+                denominator.flat[index] = 1.0
+        return numerator / denominator
+
+
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--selection-json", type=Path, required=True)
@@ -506,6 +555,43 @@ def sparse_reconstruction_trial(
     )
 
 
+def build_piecewise_sparse_blends(
+    anchor_groups: list[dict[str, object]],
+) -> dict[str, PiecewiseSparseBlend]:
+    """Create one left and one right curve from overlapping local sparse curves."""
+
+    result = {}
+    for side_index, side in enumerate(SIDES):
+        curves = []
+        for group in anchor_groups:
+            anchors = np.asarray(group["lanes_sd"][side_index], dtype=np.float64)
+            if len(anchors) < 4 or np.any(np.diff(anchors[:, 0]) <= 0.0):
+                raise ValueError(
+                    f"Window {group['group_id']} {side} sparse anchors are invalid."
+                )
+            curves.append(
+                (
+                    float(anchors[0, 0]),
+                    float(anchors[-1, 0]),
+                    PchipInterpolator(anchors[:, 0], anchors[:, 1]),
+                )
+            )
+        curves.sort(key=lambda item: item[0])
+        for first, second in zip(curves[:-1], curves[1:]):
+            if second[0] > first[1]:
+                raise ValueError(
+                    f"Adjacent {side} sparse local curves have no overlap: "
+                    f"{first[1]:.3f} < {second[0]:.3f} m."
+                )
+        result[side] = PiecewiseSparseBlend(
+            side=side,
+            curves=curves,
+            s_min=min(item[0] for item in curves),
+            s_max=max(item[1] for item in curves),
+        )
+    return result
+
+
 def choose_feature_count(
     window_fits: list[dict[str, object]],
     counts: list[int],
@@ -655,21 +741,32 @@ def manual_metrics(
     reference_id: int,
     camera_height: float,
     pitch_deg: float,
-    final_fits: dict[str, ScalarSpline],
+    prediction_method: str,
+    final_fits: dict[str, object],
     path: FrenetPath,
 ) -> list[dict[str, object]]:
     # Do not use the old short-range metric_filter here: a 105-frame experiment
     # legitimately contains annotations far behind the final reference camera.
     record = load_json(manual_json)
+    if record.get("coordinate_convention") != "image pixel [x, y] from top-left":
+        raise ValueError("Unsupported manual-annotation coordinate convention.")
+    if int(record.get("annotator_count", 1)) < 1:
+        raise ValueError("Manual annotation must identify at least one annotator.")
     poses_cam0 = load_kitti_poses(poses_path)
     poses_image = [pose @ calibration["cam0_from_image"] for pose in poses_cam0]
     reference_pose = poses_image[reference_id]
     frames = []
     for item in record["frames_xy"]:
         frame_id = int(item["frame_id"])
+        if frame_id < 0 or frame_id >= len(poses_image):
+            raise ValueError(f"Manual frame {frame_id} is outside the pose file.")
         aligned_lanes = []
         for side in SIDES:
             image_points = np.asarray(item[side], dtype=np.float64).reshape(-1, 2)
+            if len(image_points) < 4:
+                raise ValueError(
+                    f"Manual frame {frame_id} {side} has fewer than four points."
+                )
             ground = image_to_ground_ipm(
                 image_points,
                 calibration["K"],
@@ -704,6 +801,7 @@ def manual_metrics(
         predicted_to_manual = cKDTree(manual_xz).query(predicted_xz, k=1)[0]
         manual_to_predicted = cKDTree(predicted_xz).query(manual_xz, k=1)[0]
         row: dict[str, object] = {
+            "prediction_method": prediction_method,
             "side": side,
             "reference_type": "manual pseudo-ground-truth; not official KITTI GT",
             "symmetric_chamfer_mean_m": float(
@@ -755,9 +853,11 @@ def export_curves(
 def plot_final(
     path_out: Path,
     direct: dict[str, ScalarSpline],
-    final: dict[str, ScalarSpline],
+    final: dict[str, object],
     anchors: list[dict[str, object]],
     path: FrenetPath,
+    final_label: str = "overlap-blended sparse local curves",
+    title: str = "Ten overlapping 15-frame windows: final left/right lane curves",
 ) -> None:
     figure, axis = plt.subplots(figsize=(8.0, 10.0))
     colors = {"left": "#1f77b4", "right": "#d62728"}
@@ -778,12 +878,12 @@ def plot_final(
         )
         axis.plot(
             final_xz[:, 0], final_xz[:, 1], color=colors[side], linewidth=3.0,
-            label=f"{side} 10-window sparse refusion"
+            label=f"{side} {final_label}"
         )
         axis.scatter(selected[:, 0], selected[:, 1], s=12, color=colors[side], alpha=0.45)
     axis.set_xlabel("X right in final reference frame [m]")
     axis.set_ylabel("Z forward in final reference frame [m]")
-    axis.set_title("Ten overlapping 15-frame windows: final left/right lane curves")
+    axis.set_title(title)
     axis.set_aspect("equal", adjustable="datalim")
     axis.grid(True, linewidth=0.5, alpha=0.35)
     axis.legend(fontsize=8)
@@ -832,6 +932,7 @@ def main() -> None:
         )
     if int(selection["block_count"]) != 10 or int(selection["block_size"]) != 15:
         raise ValueError("This experiment requires exactly ten 15-frame windows.")
+    dataset_name = str(selection.get("dataset", "KITTI Odometry sequence unspecified"))
 
     calibration = lane_io.parse_projection(args.calib)
     poses_cam0 = load_kitti_poses(args.poses)
@@ -912,6 +1013,10 @@ def main() -> None:
     selected_feature_count, compression_trials = choose_feature_count(
         windows, feature_grid, reference_path, args
     )
+    selected_compression_trial = next(row for row in compression_trials if row["selected"])
+    compression_gate_met = bool(
+        selected_compression_trial["meets_registered_fidelity_gate"]
+    )
     anchor_rows = []
     anchor_groups = []
     reconstruction_rows = []
@@ -950,15 +1055,31 @@ def main() -> None:
     refusion_smoothing, refusion_cv_rows = spline_cross_validation(
         anchor_groups, smoothing_grid, args
     )
-    final_fits = fit_both_sides(anchor_groups, refusion_smoothing, args)
+    legacy_global_fits = fit_both_sides(anchor_groups, refusion_smoothing, args)
+    final_fits = build_piecewise_sparse_blends(anchor_groups)
     fidelity_rows = []
+    legacy_fidelity_rows = []
     for side in SIDES:
         fidelity_rows.append(
             {
                 "side": side,
-                "metric_scope": "hierarchical sparse refusion fidelity to direct fit; not accuracy",
+                "refusion_method": "overlap-blended sparse local PCHIP curves",
+                "metric_scope": "sparse piecewise refusion fidelity to direct fit; not accuracy",
                 **common_curve_metrics(
                     direct_fits[side], final_fits[side], reference_path, args.curve_samples
+                ),
+            }
+        )
+        legacy_fidelity_rows.append(
+            {
+                "side": side,
+                "refusion_method": "legacy single global spline through all sparse anchors",
+                "metric_scope": "failure-control fidelity to direct fit; not accuracy",
+                **common_curve_metrics(
+                    direct_fits[side],
+                    legacy_global_fits[side],
+                    reference_path,
+                    args.curve_samples,
                 ),
             }
         )
@@ -968,16 +1089,25 @@ def main() -> None:
     manual_rows = None
     manual_status = "pending_manual_annotation"
     if args.manual_json:
-        manual_rows = manual_metrics(
-            args.manual_json,
-            calibration,
-            args.poses,
-            reference_id,
-            args.camera_height,
-            args.pitch_deg,
-            final_fits,
-            reference_path,
-        )
+        manual_rows = []
+        for prediction_method, fits in (
+            ("direct robust cubic Frenet B-spline from all aligned points", direct_fits),
+            ("overlap-blended sparse local PCHIP curves", final_fits),
+            ("legacy single global spline through all sparse anchors", legacy_global_fits),
+        ):
+            manual_rows.extend(
+                manual_metrics(
+                    args.manual_json,
+                    calibration,
+                    args.poses,
+                    reference_id,
+                    args.camera_height,
+                    args.pitch_deg,
+                    prediction_method,
+                    fits,
+                    reference_path,
+                )
+            )
         manual_status = "complete_manual_pseudo_ground_truth_evaluation"
 
     raw_point_count = int(
@@ -996,6 +1126,10 @@ def main() -> None:
     write_csv(args.output_dir / "03_q3_sparse_refusion" / "adjacent_window_continuity.csv", continuity_rows)
     write_csv(args.output_dir / "03_q3_sparse_refusion" / "refusion_smoothing_cv.csv", refusion_cv_rows)
     write_csv(args.output_dir / "03_q3_sparse_refusion" / "fidelity_to_direct.csv", fidelity_rows)
+    write_csv(
+        args.output_dir / "03_q3_sparse_refusion" / "legacy_global_fidelity_to_direct.csv",
+        legacy_fidelity_rows,
+    )
     if manual_rows is not None:
         write_csv(args.output_dir / "04_q4_manual_evaluation" / "manual_metrics.csv", manual_rows)
     else:
@@ -1025,12 +1159,27 @@ def main() -> None:
         reference_path,
         args.curve_samples,
     )
+    export_curves(
+        args.output_dir / "01_q1_two_curves" / "legacy_global_curve_data",
+        legacy_global_fits,
+        reference_path,
+        args.curve_samples,
+    )
     plot_final(
         args.output_dir / "01_q1_two_curves" / "final_two_curves.png",
         direct_fits,
         final_fits,
         anchor_rows,
         reference_path,
+    )
+    plot_final(
+        args.output_dir / "01_q1_two_curves" / "legacy_global_two_curves.png",
+        direct_fits,
+        legacy_global_fits,
+        anchor_rows,
+        reference_path,
+        final_label="legacy global sparse-anchor spline",
+        title="Failure control: one global spline through all sparse anchors",
     )
     plot_models(
         args.output_dir / "02_q2_model_comparison" / "model_comparison.png",
@@ -1039,7 +1188,7 @@ def main() -> None:
 
     result = {
         "status": "complete",
-        "dataset": "KITTI Odometry Sequence 00",
+        "dataset": dataset_name,
         "scope": f"frames {start:06d}-{end:06d}",
         "reference_frame": reference_id,
         "coordinate_system": {
@@ -1057,6 +1206,7 @@ def main() -> None:
             "calib": str(args.calib.resolve()),
             "calib_sha256": sha256(args.calib),
             "manual_json": str(args.manual_json.resolve()) if args.manual_json else None,
+            "manual_json_sha256": sha256(args.manual_json) if args.manual_json else None,
         },
         "question_1": {
             "method": "pose alignment; per-frame equal-vote bins; robust cubic Frenet B-spline; left/right never pooled",
@@ -1073,15 +1223,17 @@ def main() -> None:
             "warning": "Model selection error measures agreement with CLRNet-derived points, not lane accuracy.",
         },
         "question_3": {
-            "method": "ten overlapping 15-frame local fits; PCHIP reconstruction from sparse samples; equal-window robust global refit",
+            "method": "ten overlapping 15-frame local fits; PCHIP reconstruction from sparse samples; support-aware overlap blending without a forced global refit",
             "selected_feature_points_per_window_per_side": selected_feature_count,
+            "selected_feature_count_meets_registered_fidelity_gate": compression_gate_met,
             "raw_aligned_points": raw_point_count,
             "sparse_anchor_points": anchor_count,
             "raw_point_to_anchor_count_ratio": compression_ratio,
-            "refusion_smoothing_per_point_m2": refusion_smoothing,
+            "legacy_global_refusion_smoothing_per_point_m2": refusion_smoothing,
             "fidelity_to_direct_fit": fidelity_rows,
+            "legacy_global_fidelity_to_direct_fit": legacy_fidelity_rows,
             "left_right_width_check": width_check,
-            "warning": "Compression fidelity to the direct fit is not accuracy.",
+            "warning": "Compression fidelity to the direct fit is not accuracy. If the registered local compression gate is false, the sparse representation is a diagnostic fallback and must not be claimed as validated.",
         },
         "question_4": {
             "status": manual_status,
@@ -1113,11 +1265,13 @@ def main() -> None:
         json.dumps(
             {
                 "status": "complete",
+                "dataset": dataset_name,
                 "previous_outputs_modified": False,
                 "frames": [start, end],
                 "valid_unique_frames": len(frames),
                 "windows_completed": len(windows),
                 "selected_feature_points_per_window_per_side": selected_feature_count,
+                "selected_feature_count_meets_registered_fidelity_gate": compression_gate_met,
                 "manual_evaluation_status": manual_status,
                 "results_json": str((audit_dir / "RESULTS.json").resolve()),
             },
@@ -1131,7 +1285,7 @@ def main() -> None:
     summary_lines = [
         "# 本周四个问题：自动实验结果",
         "",
-        f"- 数据：KITTI Odometry Sequence 00，帧 {start:06d}--{end:06d}。",
+        f"- 数据：{dataset_name}，帧 {start:06d}--{end:06d}。",
         f"- 实际有效帧：{len(frames)}；完成 10 个 15 帧窗口（步长 10、重叠 5 帧）。",
         "- 所有坐标、曲线和指标均由本次运行生成；旧输出未修改。",
         "",
@@ -1147,8 +1301,8 @@ def main() -> None:
         "",
         "## 3. 每段少量点怎样继续融合",
         "",
-        "每个 15 帧窗口的左右曲线分别试 4/6/8/12 个等 s 锚点，用 PCHIP 从锚点反向重建；在预先登记的 P95<=0.10 m、最大误差<=0.20 m 门槛下选最少点，再按窗口等权做总融合。",
-        f"结果：选择每段每侧 {selected_feature_count} 点；原始对齐点/锚点={compression_ratio:.1f} 倍；最终稀疏再融合对直接融合的平均 Chamfer 为 "
+        "每个 15 帧窗口的左右曲线分别试 4/6/8/12 个等 s 锚点，用 PCHIP 从锚点反向重建；在预先登记的 P95<=0.10 m、最大误差<=0.20 m 门槛下选最少点。相邻短段只在共同覆盖区平滑加权，不再把全部锚点强制拟合成一条全局样条。",
+        f"结果：选择每段每侧 {selected_feature_count} 点；局部保真门槛通过={compression_gate_met}；原始对齐点/锚点={compression_ratio:.1f} 倍；分段重叠融合对直接融合的平均 Chamfer 为 "
         + ", ".join(f"{row['side']} {row['symmetric_chamfer_mean_m']:.4f} m" for row in fidelity_rows)
         + "。这是压缩保真度，不是准确率。",
         "",

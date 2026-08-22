@@ -30,6 +30,9 @@ def sha256(path: Path) -> str:
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument(
+        "--dataset-name", default="KITTI Odometry Sequence 00"
+    )
     parser.add_argument("--scan-json", type=Path, action="append", required=True)
     parser.add_argument("--poses", type=Path, required=True)
     parser.add_argument("--image-dir", type=Path, required=True)
@@ -44,6 +47,35 @@ def parse_args() -> argparse.Namespace:
         help="Frame step between block starts; defaults to non-overlapping block-size.",
     )
     parser.add_argument("--minimum-valid-frames-per-block", type=int, default=5)
+    parser.add_argument(
+        "--selected-rank",
+        type=int,
+        default=1,
+        help="One-based candidate rank to materialize as selection.json.",
+    )
+    parser.add_argument(
+        "--top-candidate-count",
+        type=int,
+        default=100,
+        help="Maximum ranked candidates to export for later review or reruns.",
+    )
+    parser.add_argument(
+        "--ranking-mode",
+        choices=("coverage", "sustained_curve", "straight_curve_straight"),
+        default="coverage",
+    )
+    parser.add_argument(
+        "--minimum-trajectory-turn-deg-per-block",
+        type=float,
+        default=1.0,
+    )
+    parser.add_argument(
+        "--maximum-straight-turn-deg-per-block", type=float, default=1.5
+    )
+    parser.add_argument(
+        "--minimum-curve-turn-deg-per-block", type=float, default=3.0
+    )
+    parser.add_argument("--minimum-middle-curve-blocks", type=int, default=2)
     return parser.parse_args()
 
 
@@ -65,6 +97,10 @@ def candidate_spans(
     block_stride: int,
     minimum_valid: int,
     scan_json: Path,
+    minimum_trajectory_turn_deg_per_block: float = 1.0,
+    maximum_straight_turn_deg_per_block: float = 1.5,
+    minimum_curve_turn_deg_per_block: float = 3.0,
+    minimum_middle_curve_blocks: int = 2,
 ) -> list[dict[str, object]]:
     by_id = {int(row["frame_id"]): row for row in rows}
     ordered_ids = sorted(by_id)
@@ -77,16 +113,45 @@ def candidate_spans(
         if any(frame_id not in by_id for frame_id in frame_ids):
             continue
         block_counts = []
+        block_trajectory_turns = []
         for block_index in range(block_count):
             block_start = start + block_index * block_stride
-            block_ids = range(block_start, block_start + block_size)
+            block_ids = list(range(block_start, block_start + block_size))
             block_counts.append(
                 sum(
                     bool(by_id[frame_id]["eligible_for_two_curve_fit"])
                     for frame_id in block_ids
                 )
             )
+            block_stats = pose_window_stats(poses, block_ids)
+            block_trajectory_turns.append(
+                abs(float(block_stats["trajectory_net_heading_change_deg"]))
+            )
         stats = pose_window_stats(poses, frame_ids)
+        sustained_turn_block_count = sum(
+            turn >= minimum_trajectory_turn_deg_per_block
+            for turn in block_trajectory_turns
+        )
+        edge_block_count = max(1, min(2, block_count // 3))
+        entry_turns = block_trajectory_turns[:edge_block_count]
+        exit_turns = block_trajectory_turns[-edge_block_count:]
+        middle_turns = block_trajectory_turns[
+            edge_block_count : block_count - edge_block_count
+        ]
+        entry_mean_turn = float(np.mean(entry_turns))
+        exit_mean_turn = float(np.mean(exit_turns))
+        middle_curve_block_count = sum(
+            turn >= minimum_curve_turn_deg_per_block for turn in middle_turns
+        )
+        middle_peak_turn = float(max(middle_turns, default=0.0))
+        transition_gate = bool(
+            entry_mean_turn <= maximum_straight_turn_deg_per_block
+            and exit_mean_turn <= maximum_straight_turn_deg_per_block
+            and middle_curve_block_count >= minimum_middle_curve_blocks
+        )
+        transition_score = float(
+            sum(middle_turns) - sum(entry_turns) - sum(exit_turns)
+        )
         output.append(
             {
                 "start_frame": start,
@@ -95,6 +160,24 @@ def candidate_spans(
                 "total_valid_frames": sum(block_counts),
                 "all_blocks_meet_minimum": min(block_counts) >= minimum_valid,
                 "block_valid_counts": block_counts,
+                "block_trajectory_turn_deg": block_trajectory_turns,
+                "sustained_turn_block_count": sustained_turn_block_count,
+                "minimum_trajectory_turn_deg_per_block": (
+                    minimum_trajectory_turn_deg_per_block
+                ),
+                "straight_curve_straight_gate": transition_gate,
+                "entry_mean_trajectory_turn_deg": entry_mean_turn,
+                "middle_peak_trajectory_turn_deg": middle_peak_turn,
+                "middle_curve_block_count": middle_curve_block_count,
+                "exit_mean_trajectory_turn_deg": exit_mean_turn,
+                "maximum_straight_turn_deg_per_block": (
+                    maximum_straight_turn_deg_per_block
+                ),
+                "minimum_curve_turn_deg_per_block": (
+                    minimum_curve_turn_deg_per_block
+                ),
+                "minimum_middle_curve_blocks": minimum_middle_curve_blocks,
+                "straight_curve_straight_score": transition_score,
                 **stats,
                 "scan_json": str(scan_json.resolve()),
                 "selected_lane_points_json": str(
@@ -114,6 +197,18 @@ def main() -> None:
         raise ValueError("block-stride must be between 1 and block-size.")
     if not 1 <= args.minimum_valid_frames_per_block <= args.block_size:
         raise ValueError("minimum-valid-frames-per-block is outside the block size.")
+    if args.selected_rank < 1 or args.top_candidate_count < 1:
+        raise ValueError("selected-rank and top-candidate-count must be positive.")
+    if args.selected_rank > args.top_candidate_count:
+        raise ValueError("selected-rank cannot exceed top-candidate-count.")
+    if args.minimum_trajectory_turn_deg_per_block <= 0:
+        raise ValueError("minimum trajectory turn per block must be positive.")
+    if (
+        args.maximum_straight_turn_deg_per_block <= 0
+        or args.minimum_curve_turn_deg_per_block <= 0
+        or args.minimum_middle_curve_blocks < 1
+    ):
+        raise ValueError("Straight/curve transition thresholds must be positive.")
     if args.output_dir.exists() and any(args.output_dir.iterdir()):
         raise ValueError(f"Output directory must be new or empty: {args.output_dir}")
     args.output_dir.mkdir(parents=True, exist_ok=True)
@@ -136,22 +231,105 @@ def main() -> None:
                 block_stride,
                 args.minimum_valid_frames_per_block,
                 scan_json,
+                args.minimum_trajectory_turn_deg_per_block,
+                args.maximum_straight_turn_deg_per_block,
+                args.minimum_curve_turn_deg_per_block,
+                args.minimum_middle_curve_blocks,
             )
         )
     if not candidates:
-        raise ValueError("No complete 150-frame candidate exists in the scans.")
+        raise ValueError("No complete fixed-window candidate exists in the scans.")
 
-    ranked = sorted(
-        candidates,
-        key=lambda item: (
+    if args.ranking_mode == "straight_curve_straight":
+        ranking_key = lambda item: (  # noqa: E731
+            bool(item["all_blocks_meet_minimum"]),
+            bool(item["straight_curve_straight_gate"]),
+            int(item["minimum_valid_frames_in_a_block"]),
+            float(item["straight_curve_straight_score"]),
+            int(item["total_valid_frames"]),
+        )
+    elif args.ranking_mode == "sustained_curve":
+        ranking_key = lambda item: (  # noqa: E731
+            bool(item["all_blocks_meet_minimum"]),
+            int(item["sustained_turn_block_count"]),
+            int(item["minimum_valid_frames_in_a_block"]),
+            float(item["maximum_deviation_from_chord_m"]),
+            int(item["total_valid_frames"]),
+            float(item["path_displacement_ratio"]),
+        )
+    else:
+        ranking_key = lambda item: (  # noqa: E731
             bool(item["all_blocks_meet_minimum"]),
             int(item["minimum_valid_frames_in_a_block"]),
             int(item["total_valid_frames"]),
             float(item["total_absolute_heading_change_deg"]),
-        ),
-        reverse=True,
+        )
+    ranked = sorted(candidates, key=ranking_key, reverse=True)
+    if args.selected_rank > len(ranked):
+        raise ValueError(
+            f"selected-rank {args.selected_rank} exceeds {len(ranked)} candidates."
+        )
+    selected = ranked[args.selected_rank - 1]
+    exported = ranked[: args.top_candidate_count]
+    write_csv(
+        args.output_dir / "candidate_options.csv",
+        [
+            {
+                "rank": rank,
+                "start_frame": item["start_frame"],
+                "end_frame": item["end_frame"],
+                "all_blocks_meet_minimum": item["all_blocks_meet_minimum"],
+                "minimum_valid_frames_in_a_block": item[
+                    "minimum_valid_frames_in_a_block"
+                ],
+                "total_valid_frame_uses": item["total_valid_frames"],
+                "block_valid_counts": ";".join(
+                    map(str, item["block_valid_counts"])
+                ),
+                "sustained_turn_block_count": item[
+                    "sustained_turn_block_count"
+                ],
+                "straight_curve_straight_gate": item[
+                    "straight_curve_straight_gate"
+                ],
+                "entry_mean_trajectory_turn_deg": item[
+                    "entry_mean_trajectory_turn_deg"
+                ],
+                "middle_peak_trajectory_turn_deg": item[
+                    "middle_peak_trajectory_turn_deg"
+                ],
+                "middle_curve_block_count": item["middle_curve_block_count"],
+                "exit_mean_trajectory_turn_deg": item[
+                    "exit_mean_trajectory_turn_deg"
+                ],
+                "straight_curve_straight_score": item[
+                    "straight_curve_straight_score"
+                ],
+                "block_trajectory_turn_deg": ";".join(
+                    f"{value:.6f}"
+                    for value in item["block_trajectory_turn_deg"]
+                ),
+                "path_length_m": item["path_length_m"],
+                "displacement_m": item["displacement_m"],
+                "path_displacement_ratio": item["path_displacement_ratio"],
+                "maximum_deviation_from_chord_m": item[
+                    "maximum_deviation_from_chord_m"
+                ],
+                "trajectory_net_heading_change_deg": item[
+                    "trajectory_net_heading_change_deg"
+                ],
+                "net_heading_change_deg": item["net_heading_change_deg"],
+                "total_absolute_heading_change_deg": item[
+                    "total_absolute_heading_change_deg"
+                ],
+                "scan_json": item["scan_json"],
+                "selected_lane_points_json": item[
+                    "selected_lane_points_json"
+                ],
+            }
+            for rank, item in enumerate(exported, start=1)
+        ],
     )
-    selected = ranked[0]
     start = int(selected["start_frame"])
     block_rows = []
     manual_frame_ids = []
@@ -207,6 +385,7 @@ def main() -> None:
             if bool(selected["all_blocks_meet_minimum"])
             else "selected_but_below_requested_coverage"
         ),
+        "dataset": args.dataset_name,
         "claim_scope": (
             "frame-availability audit for ten fixed-size 15-frame windows; "
             "not a lane-identity or accuracy result"
@@ -217,6 +396,23 @@ def main() -> None:
         "overlap_frames_between_adjacent_blocks": args.block_size - block_stride,
         "total_unique_frames": args.block_size + (args.block_count - 1) * block_stride,
         "minimum_valid_frames_per_block_required": args.minimum_valid_frames_per_block,
+        "selected_rank": args.selected_rank,
+        "available_candidate_count": len(ranked),
+        "exported_candidate_count": len(exported),
+        "candidate_options_csv": str(
+            (args.output_dir / "candidate_options.csv").resolve()
+        ),
+        "ranking_mode": args.ranking_mode,
+        "minimum_trajectory_turn_deg_per_block": (
+            args.minimum_trajectory_turn_deg_per_block
+        ),
+        "maximum_straight_turn_deg_per_block": (
+            args.maximum_straight_turn_deg_per_block
+        ),
+        "minimum_curve_turn_deg_per_block": (
+            args.minimum_curve_turn_deg_per_block
+        ),
+        "minimum_middle_curve_blocks": args.minimum_middle_curve_blocks,
         "selected": selected,
         "blocks": block_rows,
         "manual_annotation_frame_ids": manual_frame_ids,
@@ -226,7 +422,7 @@ def main() -> None:
             "of interpolating through occlusion"
         ),
         "package_zip": str(package_zip.resolve()),
-        "top_candidates": ranked[:20],
+        "top_candidates": exported,
         "warnings": [
             "Five valid frames per block is a feasibility floor, not proof of accuracy.",
             "All selected candidate identities still require visual inspection.",

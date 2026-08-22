@@ -72,6 +72,35 @@ def test_curve_width_check_detects_non_crossing_lanes() -> None:
     assert 3.5 < result["median_right_minus_left_m"] < 3.7
 
 
+def test_piecewise_sparse_blend_preserves_overlapping_local_curves() -> None:
+    first_s = np.linspace(0.0, 20.0, 8)
+    second_s = np.linspace(10.0, 30.0, 8)
+    groups = [
+        {
+            "group_id": 0,
+            "lanes_sd": [
+                np.column_stack([first_s, -2.0 + 0.01 * first_s]),
+                np.column_stack([first_s, 2.0 + 0.01 * first_s]),
+            ],
+        },
+        {
+            "group_id": 1,
+            "lanes_sd": [
+                np.column_stack([second_s, -2.0 + 0.01 * second_s]),
+                np.column_stack([second_s, 2.0 + 0.01 * second_s]),
+            ],
+        },
+    ]
+    fits = weekly.build_piecewise_sparse_blends(groups)
+    progress = np.linspace(0.0, 30.0, 100)
+    np.testing.assert_allclose(
+        fits["left"].evaluate(progress), -2.0 + 0.01 * progress, atol=1e-10
+    )
+    np.testing.assert_allclose(
+        fits["right"].evaluate(progress), 2.0 + 0.01 * progress, atol=1e-10
+    )
+
+
 def test_windows_wrapper_uses_new_output_and_registered_design() -> None:
     text = (ROOT / "scripts" / "run_weekly_meeting_complete_windows.ps1").read_text(
         encoding="utf-8"
@@ -129,6 +158,7 @@ def test_full_synthetic_ten_window_run(tmp_path, monkeypatch) -> None:
         json.dumps(
             {
                 "status": "selected",
+                "dataset": "KITTI Odometry Sequence synthetic",
                 "block_count": 10,
                 "block_size": 15,
                 "block_stride": 10,
@@ -167,8 +197,12 @@ def test_full_synthetic_ten_window_run(tmp_path, monkeypatch) -> None:
     weekly.main()
     status = json.loads((output / "STATUS.json").read_text(encoding="utf-8"))
     assert status["status"] == "complete"
+    assert status["dataset"] == "KITTI Odometry Sequence synthetic"
     assert status["windows_completed"] == 10
     assert status["manual_evaluation_status"] == "pending_manual_annotation"
     assert (output / "01_q1_two_curves" / "final_two_curves.png").is_file()
     assert (output / "03_q3_sparse_refusion" / "sparse_anchors.csv").is_file()
+    assert (
+        output / "03_q3_sparse_refusion" / "legacy_global_fidelity_to_direct.csv"
+    ).is_file()
     assert (output / "MEETING_SUMMARY.md").is_file()

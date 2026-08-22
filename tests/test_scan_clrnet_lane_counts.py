@@ -37,6 +37,307 @@ def rows(counts: list[int]) -> list[dict[str, object]]:
     ]
 
 
+def lane_at_bottom_x(x: float) -> np.ndarray:
+    return np.asarray([[x, 100.0], [x, 200.0], [x, 300.0]])
+
+
+def test_ego_adjacent_selects_nearest_candidate_on_each_side_of_center():
+    lanes = [lane_at_bottom_x(100.0), lane_at_bottom_x(500.0), lane_at_bottom_x(900.0)]
+    indices, selected, reason = SCANNER.select_candidate_pair(
+        lanes, mode="ego_adjacent", image_center_x=620.0
+    )
+    assert indices == [1, 2]
+    assert [SCANNER.bottom_x(lane) for lane in selected] == [500.0, 900.0]
+    assert reason == "selected_nearest_on_each_side_of_camera_center"
+
+
+def test_outermost_mode_preserves_legacy_pairing():
+    lanes = [lane_at_bottom_x(100.0), lane_at_bottom_x(500.0), lane_at_bottom_x(900.0)]
+    indices, selected, reason = SCANNER.select_candidate_pair(
+        lanes, mode="outermost", image_center_x=620.0
+    )
+    assert indices == [0, 2]
+    assert [SCANNER.bottom_x(lane) for lane in selected] == [100.0, 900.0]
+    assert reason == "selected_outermost"
+
+
+def test_ego_adjacent_rejects_frame_without_both_sides():
+    lanes = [lane_at_bottom_x(100.0), lane_at_bottom_x(500.0)]
+    indices, selected, reason = SCANNER.select_candidate_pair(
+        lanes, mode="ego_adjacent", image_center_x=620.0
+    )
+    assert indices == []
+    assert selected == []
+    assert reason == "missing_candidate_on_one_side_of_camera_center"
+
+
+def test_temporal_pair_uses_pose_aligned_curve_distance_not_frame_local_index():
+    lanes = [
+        lane_at_bottom_x(100.0),
+        lane_at_bottom_x(500.0),
+        lane_at_bottom_x(740.0),
+        lane_at_bottom_x(1100.0),
+    ]
+    z = np.linspace(3.0, 30.0, 20)
+    candidates_ground = [
+        np.column_stack([np.full_like(z, -6.0), z]),
+        np.column_stack([np.full_like(z, -3.1), z]),
+        np.column_stack([np.full_like(z, 3.1), z]),
+        np.column_stack([np.full_like(z, 6.0), z]),
+    ]
+    previous = [
+        np.column_stack([np.full_like(z, -3.0), z]),
+        np.column_stack([np.full_like(z, 3.0), z]),
+    ]
+    pose = np.eye(4, dtype=np.float64)
+    indices, _, selected_ground, reason, costs = (
+        SCANNER.select_temporal_candidate_pair(
+            lanes,
+            candidates_ground,
+            image_center_x=620.0,
+            previous_ground_lanes=previous,
+            previous_pose=pose,
+            current_pose=pose,
+            camera_height=1.65,
+            pitch_deg=0.0,
+            maximum_match_cost_m=1.0,
+        )
+    )
+    assert indices == [1, 2]
+    assert reason == "matched_project_lane_tracks_with_pose"
+    assert len(selected_ground) == 2
+    assert max(costs) < 0.11
+
+
+def test_temporal_pair_invalidates_frame_when_track_gate_fails():
+    lanes = [lane_at_bottom_x(100.0), lane_at_bottom_x(900.0)]
+    z = np.linspace(3.0, 30.0, 20)
+    candidates_ground = [
+        np.column_stack([np.full_like(z, -8.0), z]),
+        np.column_stack([np.full_like(z, 8.0), z]),
+    ]
+    previous = [
+        np.column_stack([np.full_like(z, -3.0), z]),
+        np.column_stack([np.full_like(z, 3.0), z]),
+    ]
+    pose = np.eye(4, dtype=np.float64)
+    indices, selected, _, reason, _ = SCANNER.select_temporal_candidate_pair(
+        lanes,
+        candidates_ground,
+        image_center_x=620.0,
+        previous_ground_lanes=previous,
+        previous_pose=pose,
+        current_pose=pose,
+        camera_height=1.65,
+        pitch_deg=0.0,
+        maximum_match_cost_m=1.0,
+    )
+    assert indices == []
+    assert selected == []
+    assert "distance_gate_failed" in reason
+
+
+def test_temporal_joint_recovers_ordered_pair_when_both_candidates_are_one_side():
+    lanes = [
+        lane_at_bottom_x(700.0),
+        lane_at_bottom_x(820.0),
+        lane_at_bottom_x(1050.0),
+    ]
+    z = np.linspace(3.0, 30.0, 20)
+    candidates_ground = [
+        np.column_stack([np.full_like(z, -3.1), z]),
+        np.column_stack([np.full_like(z, 3.1), z]),
+        np.column_stack([np.full_like(z, 7.0), z]),
+    ]
+    previous = [
+        np.column_stack([np.full_like(z, -3.0), z]),
+        np.column_stack([np.full_like(z, 3.0), z]),
+    ]
+    pose = np.eye(4, dtype=np.float64)
+
+    old_indices, *_ = SCANNER.select_temporal_candidate_pair(
+        lanes,
+        candidates_ground,
+        image_center_x=620.0,
+        previous_ground_lanes=previous,
+        previous_pose=pose,
+        current_pose=pose,
+        camera_height=1.65,
+        pitch_deg=0.0,
+        maximum_match_cost_m=1.0,
+    )
+    indices, _, selected_ground, reason, costs = (
+        SCANNER.select_temporal_joint_candidate_pair(
+            lanes,
+            candidates_ground,
+            image_center_x=620.0,
+            previous_ground_lanes=previous,
+            previous_pose=pose,
+            current_pose=pose,
+            camera_height=1.65,
+            pitch_deg=0.0,
+            maximum_match_cost_m=1.0,
+        )
+    )
+
+    assert old_indices == []
+    assert indices == [0, 1]
+    assert len(set(indices)) == 2
+    assert len(selected_ground) == 2
+    assert reason == "matched_joint_ordered_project_lane_tracks_with_pose"
+    assert max(costs) < 0.11
+
+
+def test_temporal_joint_keeps_distance_gate_instead_of_forcing_a_pair():
+    lanes = [lane_at_bottom_x(700.0), lane_at_bottom_x(820.0)]
+    z = np.linspace(3.0, 30.0, 20)
+    candidates_ground = [
+        np.column_stack([np.full_like(z, -8.0), z]),
+        np.column_stack([np.full_like(z, 8.0), z]),
+    ]
+    previous = [
+        np.column_stack([np.full_like(z, -3.0), z]),
+        np.column_stack([np.full_like(z, 3.0), z]),
+    ]
+    pose = np.eye(4, dtype=np.float64)
+    indices, selected, _, reason, costs = (
+        SCANNER.select_temporal_joint_candidate_pair(
+            lanes,
+            candidates_ground,
+            image_center_x=620.0,
+            previous_ground_lanes=previous,
+            previous_pose=pose,
+            current_pose=pose,
+            camera_height=1.65,
+            pitch_deg=0.0,
+            maximum_match_cost_m=1.0,
+        )
+    )
+    assert indices == []
+    assert selected == []
+    assert reason == "temporal_joint_distance_gate_failed"
+    assert max(costs) > 1.0
+
+
+def test_temporal_independent_requires_pair_for_initialization():
+    lane = lane_at_bottom_x(500.0)
+    z = np.linspace(3.0, 30.0, 20)
+    ground = np.column_stack([np.full_like(z, -3.0), z])
+    pose = np.eye(4, dtype=np.float64)
+
+    indices, selected, selected_ground, reasons, costs = (
+        SCANNER.select_temporal_independent_candidates(
+            [lane],
+            [ground],
+            image_center_x=620.0,
+            previous_ground_lanes=[None, None],
+            previous_poses=[None, None],
+            current_pose=pose,
+            camera_height=1.65,
+            pitch_deg=0.0,
+            maximum_match_cost_m=1.0,
+        )
+    )
+
+    assert indices == [None, None]
+    assert [item.shape for item in selected] == [(0, 2), (0, 2)]
+    assert [item.shape for item in selected_ground] == [(0, 2), (0, 2)]
+    assert all("initialization" in reason for reason in reasons)
+    assert costs == [None, None]
+
+
+def test_temporal_independent_keeps_observed_left_when_right_is_missing():
+    z = np.linspace(3.0, 30.0, 20)
+    previous = [
+        np.column_stack([np.full_like(z, -3.0), z]),
+        np.column_stack([np.full_like(z, 3.0), z]),
+    ]
+    current_left = np.column_stack([np.full_like(z, -3.05), z])
+    pose = np.eye(4, dtype=np.float64)
+
+    indices, selected, selected_ground, reasons, costs = (
+        SCANNER.select_temporal_independent_candidates(
+            [lane_at_bottom_x(500.0)],
+            [current_left],
+            image_center_x=620.0,
+            previous_ground_lanes=previous,
+            previous_poses=[pose, pose],
+            current_pose=pose,
+            camera_height=1.65,
+            pitch_deg=0.0,
+            maximum_match_cost_m=1.0,
+        )
+    )
+
+    assert indices == [0, None]
+    assert len(selected[0]) == 3
+    assert selected[1].shape == (0, 2)
+    assert len(selected_ground[0]) == 20
+    assert selected_ground[1].shape == (0, 2)
+    assert reasons[0] == "matched_independent_project_lane_track_with_pose"
+    assert reasons[1] == "no_candidate_within_independent_temporal_gate"
+    assert costs[0] < 0.06
+    assert costs[1] > 1.0
+
+
+def test_temporal_independent_uses_unique_candidates_and_reinitializes_missing_side():
+    z = np.linspace(3.0, 30.0, 20)
+    left_ground = np.column_stack([np.full_like(z, -3.05), z])
+    right_ground = np.column_stack([np.full_like(z, 3.05), z])
+    previous_left = np.column_stack([np.full_like(z, -3.0), z])
+    pose = np.eye(4, dtype=np.float64)
+
+    indices, _, selected_ground, reasons, _ = (
+        SCANNER.select_temporal_independent_candidates(
+            [lane_at_bottom_x(500.0), lane_at_bottom_x(760.0)],
+            [left_ground, right_ground],
+            image_center_x=620.0,
+            previous_ground_lanes=[previous_left, None],
+            previous_poses=[pose, None],
+            current_pose=pose,
+            camera_height=1.65,
+            pitch_deg=0.0,
+            maximum_match_cost_m=1.0,
+        )
+    )
+
+    assert indices == [0, 1]
+    assert len(set(indices)) == 2
+    assert all(len(lane) == 20 for lane in selected_ground)
+    assert reasons[1] == (
+        "reinitialized_missing_track_from_validated_ego_adjacent_pair"
+    )
+
+
+def test_temporal_independent_gap_reset_is_per_side():
+    z = np.linspace(3.0, 10.0, 6)
+    lanes = [
+        np.column_stack([np.full_like(z, -3.0), z]),
+        np.column_stack([np.full_like(z, 3.0), z]),
+    ]
+    pose = np.eye(4, dtype=np.float64)
+    previous_ground = [lanes[0], lanes[1]]
+    previous_poses = [pose, pose]
+    previous_frames = [5, 8]
+    generations = [0, 4]
+
+    resets = SCANNER.expire_independent_tracks(
+        previous_ground,
+        previous_poses,
+        previous_frames,
+        generations,
+        current_frame=10,
+        maximum_gap_frames=3,
+    )
+
+    assert resets == [True, False]
+    assert previous_ground[0] is None
+    assert previous_poses[0] is None
+    assert previous_frames[0] is None
+    assert previous_ground[1] is lanes[1]
+    assert generations == [1, 4]
+
+
 def test_eligible_runs_split_on_single_candidate_frame():
     result = SCANNER.eligible_runs(rows([2, 3, 1, 2, 2, 1, 4]))
     assert result == [[0, 1], [3, 4], [6]]
@@ -106,3 +407,14 @@ def test_longer_valid_window_has_priority_over_curvature():
     )
     assert result["status"] == "selected"
     assert result["frame_ids"] == list(range(10))
+
+
+def test_position_trajectory_metric_rejects_yaw_only_false_curve():
+    poses = make_poses(20)
+    poses[:, 0, 3] = 0.0
+    poses[:, 2, 3] = np.arange(20, dtype=np.float64)
+    stats = SCANNER.pose_window_stats(poses, list(range(20)))
+    assert stats["net_heading_change_deg"] > 20.0
+    assert abs(stats["trajectory_net_heading_change_deg"]) < 1e-9
+    assert stats["maximum_deviation_from_chord_m"] < 1e-9
+    assert abs(stats["path_displacement_ratio"] - 1.0) < 1e-9
