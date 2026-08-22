@@ -34,7 +34,8 @@ new commit on the workstation.
 
 ## 3. The only normal edit points
 
-- `configs/final_windows.json`: experiment ranges and window parameters.
+- `configs/final_windows.json`: recorded experiment ranges and window parameters
+  for review; the PowerShell command-line arguments are the active run inputs.
 - `scripts/analyze_pose_curvature.py`: pose-curvature diagnostic.
 - `scripts/fit_polynomial_windows.py`: window fitting and continuity policy.
 - `scripts/scan_lane_tracks.py`: CLRNet candidate selection and project-side
