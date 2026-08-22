@@ -191,6 +191,21 @@ def test_nonconsecutive_windows_become_separate_output_segments() -> None:
     assert "nonconsecutive_window_ids" in rows[0]["break_reason"]
 
 
+def test_small_route_key_gap_uses_endpoint_continuity_instead_of_false_break() -> None:
+    first = dummy_window_result(0, 0.0)
+    second = dummy_window_result(1, 10.05)
+    segments, rows = adaptive.split_continuity_segments(
+        [first, second],
+        p95_gate_m=0.75,
+        angle_gate_deg=30.0,
+        route_gap_gate_m=0.50,
+    )
+    assert len(segments) == 1
+    assert rows[0]["passes_continuity_gate"] is True
+    assert rows[0]["continuity_mode"] == "small_route_gap_endpoint_check"
+    assert np.isclose(rows[0]["route_key_gap_m"], 0.05)
+
+
 def test_pose_polyline_order_is_monotonic_on_acute_curve() -> None:
     angle = np.linspace(0.0, 0.85 * np.pi, 50)
     trajectory = np.column_stack(
@@ -218,6 +233,20 @@ def test_internal_support_gap_splits_blended_output() -> None:
     assert len(pieces) == 2
     assert "internal_order_support_gap" in pieces[1][3]
     assert "internal_spatial_node_gap" in pieces[1][3]
+
+
+def test_isolated_single_node_piece_is_not_exported_as_a_curve() -> None:
+    keys = np.array([0.0, 0.5, 1.0, 2.0])
+    points = np.array([[1.8, 0.0], [1.8, 0.5], [1.8, 1.0], [20.0, 2.0]])
+    pieces = adaptive.split_blended_support(
+        keys,
+        points,
+        np.ones(len(keys), dtype=np.int64),
+        maximum_order_gap_frames=3.0,
+        maximum_node_gap_m=5.0,
+    )
+    assert len(pieces) == 1
+    assert len(pieces[0][0]) == 3
 
 
 def test_coverage_and_partial_side_slots_are_auditable() -> None:
@@ -309,6 +338,7 @@ def test_synthetic_straight_curve_straight_run(tmp_path: Path) -> None:
         blend_maximum_route_distance_m=12.0,
         continuity_p95_gate_m=0.75,
         continuity_angle_gate_deg=30.0,
+        continuity_route_gap_gate_m=0.50,
         maximum_internal_order_gap_frames=3.0,
         maximum_internal_node_gap_m=5.0,
         camera_height=None,

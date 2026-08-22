@@ -139,6 +139,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--blend-maximum-route-distance-m", type=float, default=12.0)
     parser.add_argument("--continuity-p95-gate-m", type=float, default=0.75)
     parser.add_argument("--continuity-angle-gate-deg", type=float, default=30.0)
+    parser.add_argument("--continuity-route-gap-gate-m", type=float, default=0.50)
     parser.add_argument("--maximum-internal-order-gap-frames", type=float, default=3.0)
     parser.add_argument("--maximum-internal-node-gap-m", type=float, default=5.0)
     parser.add_argument("--camera-height", type=float)
@@ -225,6 +226,7 @@ def validate_args(args: argparse.Namespace) -> None:
         args.blend_maximum_route_distance_m,
         args.continuity_p95_gate_m,
         args.continuity_angle_gate_deg,
+        args.continuity_route_gap_gate_m,
         args.maximum_internal_order_gap_frames,
         args.maximum_internal_node_gap_m,
     ) <= 0:
@@ -847,7 +849,9 @@ def vector_angle_deg(first: np.ndarray, second: np.ndarray) -> float:
 
 
 def pair_continuity(
-    first: WindowResult, second: WindowResult
+    first: WindowResult,
+    second: WindowResult,
+    route_gap_gate_m: float = 0.0,
 ) -> dict[str, float | int | str]:
     assert first.sample_route_keys is not None
     assert second.sample_route_keys is not None
@@ -863,8 +867,36 @@ def pair_continuity(
         "overlap_key_end": high,
     }
     if high <= low:
+        first_end_index = int(np.argmax(first.sample_route_keys))
+        second_start_index = int(np.argmin(second.sample_route_keys))
+        route_gap = float(
+            second.sample_route_keys[second_start_index]
+            - first.sample_route_keys[first_end_index]
+        )
+        if 0.0 <= route_gap <= route_gap_gate_m:
+            first_order = np.argsort(first.sample_route_keys)
+            second_order = np.argsort(second.sample_route_keys)
+            first_curve = first.curve_common_xz[first_order]
+            second_curve = second.curve_common_xz[second_order]
+            endpoint_gap = float(np.linalg.norm(first_curve[-1] - second_curve[0]))
+            first_tangent = first_curve[-1] - first_curve[-2]
+            second_tangent = second_curve[1] - second_curve[0]
+            return {
+                **base,
+                "continuity_mode": "small_route_gap_endpoint_check",
+                "route_key_gap_m": route_gap,
+                "overlap_sample_count": 1,
+                "mean_gap_m": endpoint_gap,
+                "p95_gap_m": endpoint_gap,
+                "max_gap_m": endpoint_gap,
+                "midpoint_tangent_angle_deg": vector_angle_deg(
+                    first_tangent, second_tangent
+                ),
+            }
         return {
             **base,
+            "continuity_mode": "no_supported_overlap",
+            "route_key_gap_m": max(route_gap, 0.0),
             "overlap_sample_count": 0,
             "mean_gap_m": float("nan"),
             "p95_gap_m": float("nan"),
@@ -888,6 +920,8 @@ def pair_continuity(
     ]
     return {
         **base,
+        "continuity_mode": "overlap",
+        "route_key_gap_m": 0.0,
         "overlap_sample_count": len(query),
         "mean_gap_m": float(np.mean(gaps)),
         "p95_gap_m": float(np.percentile(gaps, 95)),
@@ -935,7 +969,9 @@ def split_blended_support(
     boundaries = [0, *break_indices, len(keys)]
     pieces = []
     for piece_index, (start, end) in enumerate(zip(boundaries[:-1], boundaries[1:])):
-        if end <= start:
+        # A single isolated sample cannot define a curve and was previously
+        # drawn as a misleading one-point output segment.
+        if end - start < 2:
             continue
         if piece_index == 0:
             reason = "window_continuity_segment_start"
@@ -955,6 +991,7 @@ def split_continuity_segments(
     results: Sequence[WindowResult],
     p95_gate_m: float,
     angle_gate_deg: float,
+    route_gap_gate_m: float = 0.0,
 ) -> tuple[list[list[WindowResult]], list[dict[str, object]]]:
     """Split rather than visually connect unsupported or inconsistent gaps."""
 
@@ -965,7 +1002,7 @@ def split_continuity_segments(
     ordered[0].segment_id = 0
     rows: list[dict[str, object]] = []
     for first, second in zip(ordered[:-1], ordered[1:]):
-        diagnostic = pair_continuity(first, second)
+        diagnostic = pair_continuity(first, second, route_gap_gate_m)
         reasons: list[str] = []
         if second.spec.window_id != first.spec.window_id + 1:
             reasons.append("nonconsecutive_window_ids")
@@ -989,6 +1026,7 @@ def split_continuity_segments(
                 **diagnostic,
                 "p95_gate_m": p95_gate_m,
                 "angle_gate_deg": angle_gate_deg,
+                "route_gap_gate_m": route_gap_gate_m,
                 "passes_continuity_gate": passes,
                 "break_reason": ";".join(reasons),
                 "first_segment_id": first.segment_id,
@@ -1473,6 +1511,7 @@ def run(args: argparse.Namespace) -> dict[str, object]:
             by_side[side],
             args.continuity_p95_gate_m,
             args.continuity_angle_gate_deg,
+            args.continuity_route_gap_gate_m,
         )
         segments_by_side[side] = segments
         continuity_rows.extend(rows)
@@ -1780,6 +1819,7 @@ def run(args: argparse.Namespace) -> dict[str, object]:
             "adjacent_window_rows": len(continuity_rows),
             "p95_gate_m": args.continuity_p95_gate_m,
             "tangent_angle_gate_deg": args.continuity_angle_gate_deg,
+            "small_route_gap_endpoint_gate_m": args.continuity_route_gap_gate_m,
             "maximum_internal_order_gap_frames": (
                 args.maximum_internal_order_gap_frames
             ),
