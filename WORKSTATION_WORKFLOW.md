@@ -90,7 +90,8 @@ python .\scripts\run_all_pose_curvature.py `
 ```
 
 This step needs only the pose files; it does not load images or CLRNet. Review
-`all_sequences_summary.csv` and `all_sequences_curvature_overview.png` before
+`all_sequences_summary.csv`, `stable_window_candidates.csv`, and
+`all_sequences_curvature_overview.png` before
 choosing turning intervals for the more expensive lane-detection pipeline.
 
 ## 6. Extension audit

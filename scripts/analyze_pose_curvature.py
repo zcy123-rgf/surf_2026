@@ -41,34 +41,57 @@ def choose_smoothing_window(frame_count: int, requested: int) -> int:
     return window
 
 
-def compute_curvature(poses: np.ndarray, smoothing_window: int = 11) -> dict[str, np.ndarray]:
+def compute_curvature(
+    poses: np.ndarray,
+    smoothing_window: int = 11,
+    minimum_step_m: float = 0.01,
+) -> dict[str, np.ndarray]:
+    """Compute curvature after resampling the trajectory at uniform arc length.
+
+    KITTI pose files can contain a few almost-stationary frame pairs. Taking
+    second derivatives with those tiny spacings creates artificial curvature
+    spikes. Uniform arc-length resampling makes the derivative scale stable;
+    the original step size is retained so downstream reports can flag such
+    frames instead of silently dropping them.
+    """
     positions = poses[:, :3, 3][:, [0, 2]]
     steps = np.linalg.norm(np.diff(positions, axis=0), axis=1)
     s = np.concatenate([[0.0], np.cumsum(steps)])
-    if len(s) < 3 or np.any(np.diff(s) <= 1e-8):
+    if len(s) < 3 or np.any(np.diff(s) <= 1e-12):
         raise ValueError("Pose trajectory must contain at least three distinct positions.")
 
-    window = choose_smoothing_window(len(s), smoothing_window)
-    if window:
-        smooth_x = savgol_filter(positions[:, 0], window, 2, mode="interp")
-        smooth_z = savgol_filter(positions[:, 1], window, 2, mode="interp")
-    else:
-        smooth_x, smooth_z = positions[:, 0], positions[:, 1]
+    positive_steps = steps[steps > 1e-12]
+    spacing = float(np.median(positive_steps))
+    sample_count = max(3, int(np.ceil(s[-1] / spacing)) + 1)
+    uniform_s = np.linspace(0.0, float(s[-1]), sample_count)
+    uniform_x = np.interp(uniform_s, s, positions[:, 0])
+    uniform_z = np.interp(uniform_s, s, positions[:, 1])
 
-    dx = np.gradient(smooth_x, s)
-    dz = np.gradient(smooth_z, s)
-    ddx = np.gradient(dx, s)
-    ddz = np.gradient(dz, s)
+    window = choose_smoothing_window(len(uniform_s), smoothing_window)
+    if window:
+        smooth_x = savgol_filter(uniform_x, window, 2, mode="interp")
+        smooth_z = savgol_filter(uniform_z, window, 2, mode="interp")
+    else:
+        smooth_x, smooth_z = uniform_x, uniform_z
+
+    dx = np.gradient(smooth_x, uniform_s)
+    dz = np.gradient(smooth_z, uniform_s)
+    ddx = np.gradient(dx, uniform_s)
+    ddz = np.gradient(dz, uniform_s)
     speed_sq = np.maximum(dx * dx + dz * dz, 1e-12)
     signed = (dx * ddz - dz * ddx) / np.power(speed_sq, 1.5)
+    signed = np.interp(s, uniform_s, signed)
     absolute = np.abs(signed)
-    heading = np.unwrap(np.arctan2(dx, dz))
+    uniform_heading = np.unwrap(np.arctan2(dx, dz))
+    heading = np.interp(s, uniform_s, uniform_heading)
     heading_change = np.diff(heading, prepend=heading[0])
     return {
         "frame_offset": np.arange(len(s), dtype=np.int64),
         "x_m": positions[:, 0],
         "z_m": positions[:, 1],
         "arc_length_m": s,
+        "step_m": np.concatenate([[0.0], steps]),
+        "small_step_flag": (np.concatenate([[0.0], steps]) < minimum_step_m).astype(np.int8),
         "signed_curvature_1_per_m": signed,
         "absolute_curvature_1_per_m": absolute,
         "heading_rad": heading,
@@ -90,6 +113,8 @@ def summarize(curvature: dict[str, np.ndarray], start_frame: int, end_frame: int
         "max_absolute_curvature_1_per_m": float(np.max(absolute)),
         "integrated_absolute_curvature_rad": float(np.sum(absolute[:-1] * ds)),
         "total_absolute_heading_change_rad": float(np.sum(np.abs(np.diff(curvature["heading_rad"])) )),
+        "resampling_spacing_m": float(np.median(curvature["step_m"][1:])),
+        "small_step_count": int(np.sum(curvature["small_step_flag"])),
     }
 
 
@@ -125,6 +150,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--end-frame", type=int, required=True)
     parser.add_argument("--output-dir", type=Path, required=True)
     parser.add_argument("--smoothing-window", type=int, default=11)
+    parser.add_argument("--minimum-step-m", type=float, default=0.01)
     return parser.parse_args()
 
 
@@ -136,7 +162,9 @@ def main() -> None:
     if args.end_frame >= len(all_poses):
         raise ValueError("Requested frame range exceeds the pose file.")
     curvature = compute_curvature(
-        all_poses[args.start_frame : args.end_frame + 1], args.smoothing_window
+        all_poses[args.start_frame : args.end_frame + 1],
+        args.smoothing_window,
+        args.minimum_step_m,
     )
     summary = summarize(curvature, args.start_frame, args.end_frame)
     write_outputs(args.output_dir, curvature, summary, args.start_frame)
