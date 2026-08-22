@@ -18,5 +18,12 @@
     "polynomial_degree": 2,
     "minimum_valid_frames_per_side": 8,
     "maximum_missing_run_frames": 3
+  },
+  "sequence01_extension_audit": {
+    "sequence_id": "01",
+    "start_frame": 851,
+    "end_frame": 1005,
+    "purpose": "curvature and coverage audit before widening the final core range",
+    "do_not_present_as_validated_core": true
   }
 }

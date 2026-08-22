@@ -12,6 +12,13 @@ assert SPEC.loader is not None
 sys.modules[SPEC.name] = MODULE
 SPEC.loader.exec_module(MODULE)
 
+CURVATURE_PATH = Path(__file__).parents[1] / "scripts" / "analyze_pose_curvature.py"
+CURVATURE_SPEC = importlib.util.spec_from_file_location("analyze_pose_curvature", CURVATURE_PATH)
+CURVATURE = importlib.util.module_from_spec(CURVATURE_SPEC)
+assert CURVATURE_SPEC.loader is not None
+sys.modules[CURVATURE_SPEC.name] = CURVATURE
+CURVATURE_SPEC.loader.exec_module(CURVATURE)
+
 
 def test_short_internal_gaps_only_returns_bracketed_short_runs():
     assert MODULE.short_internal_gaps(0, 9, [0, 1, 3, 4, 7, 8, 9], 2) == [2, 5, 6]
@@ -41,3 +48,10 @@ def test_polynomial_fit_stays_in_metric_xz():
     assert fit.curve_xz.shape == (40, 2)
     assert np.allclose(fit.curve_xz[0], aggregate[0], atol=0.05)
     assert np.allclose(fit.curve_xz[-1], aggregate[-1], atol=0.05)
+
+
+def test_pose_curvature_is_near_zero_for_a_straight_trajectory():
+    poses = np.repeat(np.eye(4, dtype=np.float64)[None, :, :], 20, axis=0)
+    poses[:, 2, 3] = np.arange(20, dtype=np.float64)
+    result = CURVATURE.compute_curvature(poses, smoothing_window=5)
+    assert float(np.max(result["absolute_curvature_1_per_m"])) < 1e-8

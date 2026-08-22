@@ -1,5 +1,18 @@
 # SURF Final Polynomial Release
 
+Additional final audit tools:
+
+- `scripts/analyze_pose_curvature.py`: computes absolute planar KITTI pose curvature and writes a CSV, summary, and plot.
+- `scripts/summarize_run_metrics.py`: reports held-out consistency, observed-fit Chamfer, coverage, and continuity without claiming unavailable ground-truth accuracy.
+- `METRIC_DEFINITIONS.md`: defines the measurement basis and limitations.
+
+The pose-curvature plot is independent of lane detection. A high-quality
+curvature signal does not imply that CLRNet observes both lane boundaries: the
+turning sections of Sequence 03 (29-128) and Sequence 07 (415-514) remain
+coverage-limited examples. Sequence 01 (857-961) is currently the validated
+two-side core interval. The optional 01 extension (851-1005) is an audit range
+only until its coverage and continuity outputs are reviewed.
+
 这是今天收敛用的最小可交付版本。它只保留一条主线：
 
 ```text
