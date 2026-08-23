@@ -27,6 +27,7 @@ def test_fixed_sequence01_release_entrypoint_is_registered() -> None:
     assert '"scripts\\evaluate_fixed_project_metrics.py"' in creator
     assert '"scripts\\run_fixed_project_metrics_windows.ps1"' in creator
     assert '"scripts\\audit_surf_final_workspace.ps1"' in creator
+    assert '"scripts\\clean_surf_final_workspace.ps1"' in creator
     assert '"SURF_FINAL_DECISIONS_ZH.md"' in creator
     assert '"FIXED_EVALUATION_PROTOCOL_ZH.md"' in creator
     assert '"FINAL_WORKSPACE_INVENTORY_ZH.md"' in creator
@@ -51,6 +52,24 @@ def test_workspace_audit_is_non_destructive_and_checks_final_artifacts() -> None
         assert token in audit
     for destructive in ("Remove-Item", "Move-Item", "Clear-Content"):
         assert destructive not in audit
+
+
+def test_workspace_cleanup_has_explicit_safety_gates() -> None:
+    cleanup = (ROOT / "scripts" / "clean_surf_final_workspace.ps1").read_text(
+        encoding="utf-8"
+    )
+    for token in (
+        "ConfirmCleanup",
+        'if ($ProjectRoot -ne "F:\\surf_final")',
+        "completed_sequences -ne 11",
+        'metric_protocol_version -ne "2.0-domain-aligned"',
+        "SURF_FINAL_SOURCE_RUNTIME_*.zip",
+        "fixed_project_metrics_20260823_153156",
+        "surf_final_sequence01_full_0000_1100_20260823_015856",
+        "audit_surf_final_workspace.ps1",
+    ):
+        assert token in cleanup
+    assert "fixed_project_metrics_20260823_155206" not in cleanup
 
 
 def test_final_window_exports_auditable_metrics() -> None:

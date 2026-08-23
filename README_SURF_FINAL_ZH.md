@@ -108,6 +108,10 @@ Sequence 00–10全量批处理入口，共覆盖23,201帧。每个Sequence使�
 
 只读检查`F:\surf_final`的必需文件、CLRNet权重、全量结果、固定评测、顶层额外内容、缓存和未登记输出。可选生成包含CLRNet运行时的源码备份；不会删除或移动原文件。目录规范见`FINAL_WORKSPACE_INVENTORY_ZH.md`。
 
+#### `clean_surf_final_workspace.ps1`
+
+只用于2026-08-23最终审计后的精确清理。运行前强制检查11/11全量结果、协议2.0评测和CLRNet运行时备份；只删除清单中逐项确认的旧补丁、旧错误评测目录和可再生Python缓存，随后自动重新审计。不会删除完整Sequence 01、Sequence 00–10、正式评测或备份。
+
 #### `kitti_odometry_workstation_input.ps1`
 
 解析工作站KITTI目录，定位指定Sequence的`image_2`、`calib.txt`、`poses/xx.txt`和`times.txt`；检查图像、位姿、时间戳数量及帧编号是否对齐。

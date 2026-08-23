@@ -45,6 +45,7 @@ $RequiredFiles = @(
     "scripts\run_fixed_project_metrics_windows.ps1",
     "scripts\evaluate_fixed_project_metrics.py",
     "scripts\audit_surf_final_workspace.ps1",
+    "scripts\clean_surf_final_workspace.ps1",
     "surf_bev\detectors.py",
     "surf_bev\geometry.py",
     "CLRNet\configs\clrnet\clr_resnet18_culane.py",
@@ -114,10 +115,13 @@ if ($CacheRows.Count -gt 0) {
 $RegisteredOutputPrefixes = @(
     "final_seq01_851_1005_",
     "final_seq01_0_1100_",
+    "surf_final_sequence01_851_1005_",
+    "surf_final_sequence01_full_0000_1100_",
     "surf_final_all_sequences_",
     "fixed_project_metrics_",
     "pose_curvature_all_sequences_",
-    "workspace_audit_"
+    "workspace_audit_",
+    "workspace_cleanup_"
 )
 $OutputRows = @(Get-ChildItem -LiteralPath $OutputsRoot -Directory | ForEach-Object {
     $Registered = $false

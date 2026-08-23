@@ -94,7 +94,8 @@ $FinalScripts = @(
     "scripts\summarize_surf_final_all_sequences.py",
     "scripts\evaluate_fixed_project_metrics.py",
     "scripts\run_fixed_project_metrics_windows.ps1",
-    "scripts\audit_surf_final_workspace.ps1"
+    "scripts\audit_surf_final_workspace.ps1",
+    "scripts\clean_surf_final_workspace.ps1"
 )
 $RansacBaselineScripts = @(
     "scripts\kitti00_workstation_input.ps1",
