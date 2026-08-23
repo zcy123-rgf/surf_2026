@@ -26,6 +26,7 @@ from scipy.spatial import cKDTree
 
 
 THRESHOLDS_M = (0.3, 0.5, 1.0)
+METRIC_PROTOCOL_VERSION = "2.0-domain-aligned"
 
 
 def parse_args() -> argparse.Namespace:
@@ -69,6 +70,117 @@ def points_from_rows(
     if not len(points):
         return np.empty((0, 2), dtype=float)
     return points[np.isfinite(points).all(axis=1)]
+
+
+def route_tangents(route_xz: np.ndarray) -> np.ndarray:
+    if len(route_xz) < 2:
+        raise ValueError("Trajectory must contain at least two points.")
+    tangents = np.empty_like(route_xz)
+    tangents[0] = route_xz[1] - route_xz[0]
+    tangents[-1] = route_xz[-1] - route_xz[-2]
+    if len(route_xz) > 2:
+        tangents[1:-1] = route_xz[2:] - route_xz[:-2]
+    norms = np.linalg.norm(tangents, axis=1)
+    valid = norms > 1e-8
+    tangents[valid] /= norms[valid, None]
+    tangents[~valid] = np.array([0.0, 1.0])
+    return tangents
+
+
+def observation_route_keys(
+    points_xz: np.ndarray,
+    route_xz: np.ndarray,
+    route_tangent_vectors: np.ndarray,
+    search_start_index: int,
+    search_end_index: int,
+) -> tuple[np.ndarray, np.ndarray]:
+    """Assign route-progress keys using the same convention as fusion."""
+
+    low = max(0, int(search_start_index))
+    high = min(len(route_xz) - 1, int(search_end_index))
+    if high < low:
+        raise ValueError("Invalid trajectory search interval.")
+    indices = np.arange(low, high + 1, dtype=np.int64)
+    distances, local_nearest = cKDTree(route_xz[indices]).query(points_xz, k=1)
+    nearest = indices[np.asarray(local_nearest, dtype=np.int64)]
+    steps = np.linalg.norm(np.diff(route_xz, axis=0), axis=1)
+    usable = steps[steps > 1e-5]
+    if not len(usable):
+        raise ValueError("Trajectory has no usable motion step.")
+    typical_step = max(float(np.median(usable)), 1e-3)
+    local = np.einsum(
+        "ij,ij->i", points_xz - route_xz[nearest], route_tangent_vectors[nearest]
+    )
+    fraction = np.clip(local / typical_step, -0.49, 0.49)
+    return nearest.astype(np.float64) + fraction, np.asarray(distances, dtype=float)
+
+
+def restrict_observations_to_prediction_domain(
+    observation_rows: list[dict[str, str]],
+    curve_rows: list[dict[str, str]],
+    route_xz: np.ndarray,
+    route_tangent_vectors: np.ndarray,
+    frame_to_route_index: dict[int, int],
+    domain_margin_keys: float = 0.5,
+    route_search_pad_frames: int = 60,
+    maximum_route_distance_m: float = 8.0,
+) -> tuple[np.ndarray, dict[str, object]]:
+    """Keep only observations in the route interval emitted by the window.
+
+    A 15-frame window sees well beyond the route portion it is responsible for
+    emitting. Comparing that full look-ahead support against the short emitted
+    segment would mislabel intentional domain clipping as missing geometry.
+    """
+
+    observed = points_from_rows(observation_rows, "point_id")
+    predicted_keys = np.array(
+        [finite_float(row.get("ordering_key")) for row in curve_rows], dtype=float
+    )
+    predicted_keys = predicted_keys[np.isfinite(predicted_keys)]
+    if not len(observed) or not len(predicted_keys):
+        return np.empty((0, 2), dtype=float), {
+            "observed_full_raw_count": int(len(observed)),
+            "observed_in_prediction_domain_raw_count": 0,
+        }
+    first_curve = curve_rows[0]
+    start_frame = int(float(first_curve["start_frame"]))
+    end_frame = int(float(first_curve["end_frame"]))
+    if start_frame not in frame_to_route_index or end_frame not in frame_to_route_index:
+        raise ValueError(
+            f"Trajectory does not cover curve window {start_frame}-{end_frame}."
+        )
+    start_index = frame_to_route_index[start_frame]
+    end_index = frame_to_route_index[end_frame]
+    observed_keys, route_distances = observation_route_keys(
+        observed,
+        route_xz,
+        route_tangent_vectors,
+        start_index - route_search_pad_frames,
+        end_index + route_search_pad_frames,
+    )
+    domain_low = float(np.min(predicted_keys) - domain_margin_keys)
+    domain_high = float(np.max(predicted_keys) + domain_margin_keys)
+    keep = (
+        (observed_keys >= domain_low)
+        & (observed_keys <= domain_high)
+        & (route_distances <= maximum_route_distance_m)
+    )
+    restricted = observed[keep]
+    restricted_keys = observed_keys[keep]
+    restricted = restricted[np.argsort(restricted_keys, kind="stable")]
+    return restricted, {
+        "observed_full_raw_count": int(len(observed)),
+        "observed_in_prediction_domain_raw_count": int(len(restricted)),
+        "observed_outside_prediction_domain_raw_count": int(np.sum(~keep)),
+        "prediction_domain_ordering_key_start": domain_low,
+        "prediction_domain_ordering_key_end": domain_high,
+        "maximum_observation_route_distance_m": maximum_route_distance_m,
+        "domain_rule": (
+            "compare only observations projected into the route-progress interval "
+            "emitted by this window and within 8 m of that local route; margin is "
+            "0.5 route-index units"
+        ),
+    }
 
 
 def resample_polyline(points: np.ndarray, spacing_m: float) -> np.ndarray:
@@ -230,14 +342,31 @@ def evaluate_sequence(
     aggregate_path = adaptive / "window_aggregate_points.csv"
     curves_path = adaptive / "window_curve_samples.csv"
     models_path = adaptive / "model_comparison.csv"
+    trajectory_path = adaptive / "trajectory_common_xz.csv"
     final_metrics_path = result_directory / "FINAL_METRICS.json"
-    for required in (aggregate_path, curves_path, models_path, final_metrics_path):
+    for required in (
+        aggregate_path,
+        curves_path,
+        models_path,
+        trajectory_path,
+        final_metrics_path,
+    ):
         if not required.is_file():
             raise FileNotFoundError(f"Required completed-result file is missing: {required}")
 
     observations = read_csv(aggregate_path)
     curves = read_csv(curves_path)
     model_rows = read_csv(models_path)
+    trajectory_rows = read_csv(trajectory_path)
+    trajectory_rows.sort(key=lambda row: int(float(row["frame_id"])))
+    route_xz = points_from_rows(trajectory_rows, "frame_id")
+    if len(route_xz) != len(trajectory_rows):
+        raise ValueError("Trajectory contains invalid X/Z coordinates.")
+    route_tangent_vectors = route_tangents(route_xz)
+    frame_to_route_index = {
+        int(float(row["frame_id"])): index
+        for index, row in enumerate(trajectory_rows)
+    }
     final_metrics = json.loads(final_metrics_path.read_text(encoding="utf-8-sig"))
     observation_groups = group_rows(observations, ("window_id", "side"))
     curve_groups = group_rows(curves, ("window_id", "side"))
@@ -250,7 +379,13 @@ def evaluate_sequence(
     for window_id, side in pair_keys:
         observation_rows = observation_groups[(window_id, side)]
         curve_rows = curve_groups[(window_id, side)]
-        observed = points_from_rows(observation_rows, "point_id")
+        observed, domain_metrics = restrict_observations_to_prediction_domain(
+            observation_rows,
+            curve_rows,
+            route_xz,
+            route_tangent_vectors,
+            frame_to_route_index,
+        )
         predicted = points_from_rows(curve_rows, "sample_id")
         if len(observed) < 2 or len(predicted) < 2:
             continue
@@ -264,6 +399,7 @@ def evaluate_sequence(
             "side": side,
             "classification": first_curve.get("classification", ""),
             "model": first_curve.get("model", ""),
+            **domain_metrics,
             **pair_metrics,
         }
         window_rows.append(row)
@@ -287,7 +423,12 @@ def evaluate_sequence(
             "post-hoc agreement with CLRNet/IPM observations; not lane ground-truth accuracy"
         ),
         "sampling_note": (
-            "overlapping windows are evaluated separately after equal arc-length resampling"
+            "overlapping windows are evaluated separately after restricting observations "
+            "to each window's emitted route-progress domain and equal arc-length resampling"
+        ),
+        "domain_alignment_note": (
+            "the upstream window observes farther ahead than the route portion it emits; "
+            "out-of-domain observations are not missing predictions"
         ),
         **distance_stats(pred_to_obs_all, "prediction_to_observation"),
         **distance_stats(obs_to_pred_all, "observation_to_prediction"),
@@ -362,6 +503,12 @@ def summary_csv_row(summary: dict[str, object]) -> dict[str, object]:
         "symmetric_p90_m": summary.get("symmetric_p90_m"),
         "symmetric_max_m": summary.get("symmetric_max_m"),
         "symmetric_chamfer_m": summary.get("symmetric_chamfer_m"),
+        "prediction_to_observation_p90_m": summary.get(
+            "prediction_to_observation_p90_m"
+        ),
+        "observation_to_prediction_p90_m": summary.get(
+            "observation_to_prediction_p90_m"
+        ),
         "window_discrete_frechet_median_m": summary.get(
             "window_discrete_frechet_median_m"
         ),
@@ -418,7 +565,10 @@ def create_figure(rows: list[dict[str, object]], output: Path) -> None:
         axis.set_xticks(x, labels)
         axis.set_xlabel("KITTI Odometry Sequence")
         axis.grid(axis="y", alpha=0.25)
-    fig.suptitle("SURF fixed internal-consistency scorecard (not ground-truth accuracy)")
+    fig.suptitle(
+        "SURF domain-aligned internal-consistency scorecard "
+        "(not ground-truth accuracy)"
+    )
     fig.savefig(output, dpi=180)
     plt.close(fig)
 
@@ -459,6 +609,7 @@ def run(batch_summary: Path, output_dir: Path, spacing_m: float) -> dict[str, ob
         json.dumps(
             json_safe({
                 "status": "complete" if not failures else "complete_with_failures",
+                "metric_protocol_version": METRIC_PROTOCOL_VERSION,
                 "metric_scope": (
                     "internal consistency and operational feasibility; no official KITTI lane ground truth"
                 ),
@@ -484,6 +635,7 @@ def run(batch_summary: Path, output_dir: Path, spacing_m: float) -> dict[str, ob
     create_figure(summary_rows, output_dir / "FIXED_METRICS_SCORECARD.png")
     status = {
         "status": "complete" if not failures else "complete_with_failures",
+        "metric_protocol_version": METRIC_PROTOCOL_VERSION,
         "evaluated_sequence_count": len(summaries),
         "failed_sequence_count": len(failures),
         "previous_outputs_modified": False,

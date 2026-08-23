@@ -67,6 +67,13 @@ def test_batch_posthoc_run(tmp_path: Path) -> None:
     write_csv(adaptive / "window_aggregate_points.csv", observations)
     write_csv(adaptive / "window_curve_samples.csv", curves)
     write_csv(
+        adaptive / "trajectory_common_xz.csv",
+        [
+            {"frame_id": index, "x_common_m": 0.0, "z_common_m": float(index)}
+            for index in range(15)
+        ],
+    )
+    write_csv(
         adaptive / "model_comparison.csv",
         [
             {
@@ -109,3 +116,39 @@ def test_batch_posthoc_run(tmp_path: Path) -> None:
     assert abs(float(summary["symmetric_p90_m"]) - 0.1) < 1e-9
     assert float(summary["observation_coverage_at_0p5m"]) == 1.0
     assert (output / "FIXED_METRICS_SCORECARD.png").is_file()
+
+
+def test_window_domain_does_not_penalize_forward_lookahead() -> None:
+    observed_rows = [
+        {
+            "point_id": index,
+            "x_common_m": 0.0,
+            "z_common_m": float(index),
+        }
+        for index in range(11)
+    ]
+    curve_rows = [
+        {
+            "start_frame": 0,
+            "end_frame": 5,
+            "sample_id": index,
+            "ordering_key": float(index),
+            "x_common_m": 0.1,
+            "z_common_m": float(index),
+        }
+        for index in range(6)
+    ]
+    route = np.column_stack([np.zeros(11), np.arange(11, dtype=float)])
+    restricted, details = metrics.restrict_observations_to_prediction_domain(
+        observed_rows,
+        curve_rows,
+        route,
+        metrics.route_tangents(route),
+        {index: index for index in range(11)},
+    )
+    assert len(restricted) == 6
+    assert details["observed_outside_prediction_domain_raw_count"] == 5
+    result, _, _ = metrics.evaluate_pair(
+        restricted, route[:6] + [0.1, 0.0], 0.5
+    )
+    assert abs(float(result["symmetric_p90_m"]) - 0.1) < 1e-9
