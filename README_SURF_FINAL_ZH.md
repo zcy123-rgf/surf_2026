@@ -70,6 +70,10 @@ CLRNet 每帧输出若干候选车道曲线；程序将每条候选采样为有�
 
 新实验输出区。每次运行建立新的时间戳目录，程序拒绝覆盖非空目录。这里允许出现多次正式运行结果，但不放手工草稿。
 
+### `backups/`
+
+由工作区审计脚本生成的源码与CLRNet运行时备份。备份不包含体积较大的全量实验输出；正式输出继续保存在`workstation_outputs/`。
+
 ## 4. `scripts/` 中每个文件的作用
 
 ### A. 最终长路段主流程
@@ -91,6 +95,18 @@ Sequence 00–10全量批处理入口，共覆盖23,201帧。每个Sequence使�
 #### `run_surf_final_window_windows.ps1`
 
 通用单路段总控脚本。依次执行车道检测/关联、曲率分类、分窗口模型拟合与融合、缺口审计，并生成`FINAL_STATUS.json`、`FINAL_METRICS.json`和review ZIP。
+
+#### `run_fixed_project_metrics_windows.ps1`
+
+读取已经完成的Sequence 00–10结果，按固定协议重新汇总内部一致性指标，不重跑CLRNet、不修改历史输出。最终协议为`2.0-domain-aligned`：只在每个窗口实际输出曲线负责的轨迹区间内做双向距离比较。
+
+#### `evaluate_fixed_project_metrics.py`
+
+固定评测实现。左右分开计算双向P90、0.5 m支持率、RMSE、Chamfer、Fréchet，并同时保留可用帧、拟合完成率和接口连续性。结果不是官方车道真值准确率。
+
+#### `audit_surf_final_workspace.ps1`
+
+只读检查`F:\surf_final`的必需文件、CLRNet权重、全量结果、固定评测、顶层额外内容、缓存和未登记输出。可选生成包含CLRNet运行时的源码备份；不会删除或移动原文件。目录规范见`FINAL_WORKSPACE_INVENTORY_ZH.md`。
 
 #### `kitti_odometry_workstation_input.ps1`
 

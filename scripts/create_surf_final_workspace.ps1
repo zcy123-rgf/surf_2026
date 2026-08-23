@@ -74,7 +74,9 @@ $RootFiles = @(
     "requirements-windows.txt",
     "README_SURF_FINAL_ZH.md",
     "SURF_FINAL_PIPELINE_ZH.md",
-    "SURF_FINAL_DECISIONS_ZH.md"
+    "SURF_FINAL_DECISIONS_ZH.md",
+    "FIXED_EVALUATION_PROTOCOL_ZH.md",
+    "FINAL_WORKSPACE_INVENTORY_ZH.md"
 )
 $FinalScripts = @(
     "scripts\kitti_odometry_workstation_input.ps1",
@@ -89,7 +91,10 @@ $FinalScripts = @(
     "scripts\run_surf_final_sequence01_windows.ps1",
     "scripts\run_surf_final_sequence01_full_windows.ps1",
     "scripts\run_surf_final_all_sequences_windows.ps1",
-    "scripts\summarize_surf_final_all_sequences.py"
+    "scripts\summarize_surf_final_all_sequences.py",
+    "scripts\evaluate_fixed_project_metrics.py",
+    "scripts\run_fixed_project_metrics_windows.ps1",
+    "scripts\audit_surf_final_workspace.ps1"
 )
 $RansacBaselineScripts = @(
     "scripts\kitti00_workstation_input.ps1",

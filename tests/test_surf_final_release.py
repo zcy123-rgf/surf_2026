@@ -24,10 +24,33 @@ def test_fixed_sequence01_release_entrypoint_is_registered() -> None:
     assert '"scripts\\run_surf_final_sequence01_full_windows.ps1"' in creator
     assert '"scripts\\run_surf_final_all_sequences_windows.ps1"' in creator
     assert '"scripts\\summarize_surf_final_all_sequences.py"' in creator
+    assert '"scripts\\evaluate_fixed_project_metrics.py"' in creator
+    assert '"scripts\\run_fixed_project_metrics_windows.ps1"' in creator
+    assert '"scripts\\audit_surf_final_workspace.ps1"' in creator
     assert '"SURF_FINAL_DECISIONS_ZH.md"' in creator
+    assert '"FIXED_EVALUATION_PROTOCOL_ZH.md"' in creator
+    assert '"FINAL_WORKSPACE_INVENTORY_ZH.md"' in creator
     assert '"README_SURF_FINAL_ZH.md"' in creator
     assert '"surf_bev\\detectors.py"' in creator
     assert '"surf_bev\\lane_fusion_weighted.py"' not in creator
+
+
+def test_workspace_audit_is_non_destructive_and_checks_final_artifacts() -> None:
+    audit = (ROOT / "scripts" / "audit_surf_final_workspace.ps1").read_text(
+        encoding="utf-8"
+    )
+    for token in (
+        "audit_is_read_only_except_new_report_and_optional_backup",
+        "deletion_performed = $false",
+        "CLRNet\\weights\\culane_r18.pth",
+        "surf_final_all_sequences_*",
+        "2.0-domain-aligned",
+        "fixed_project_metrics_*",
+        "ready_for_final_retention",
+    ):
+        assert token in audit
+    for destructive in ("Remove-Item", "Move-Item", "Clear-Content"):
+        assert destructive not in audit
 
 
 def test_final_window_exports_auditable_metrics() -> None:
