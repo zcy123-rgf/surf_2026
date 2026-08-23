@@ -10,7 +10,35 @@
 
 本阶段没有实现新的 SLAM 后端和完整 4D 语义地图；KITTI pose 是已发布的位姿输入。没有逐帧官方左右车道边界真值，因此所有留出误差均为内部一致性指标，不称为真实准确率。
 
-## 2. 打开方式
+## 2. 组员十分钟理解路线
+
+第一次打开项目时，按下面顺序阅读即可：
+
+1. 先看本文件第3节和第4节，了解怎样打开项目、目录分别保存什么；
+2. 再看`SURF_FINAL_PIPELINE_ZH.md`，理解每个模块的输入、处理和输出；
+3. 需要了解实验结论时看`SURF_FINAL_DECISIONS_ZH.md`和`FIXED_EVALUATION_PROTOCOL_ZH.md`；
+4. 需要重跑时，从`scripts/`中的PowerShell入口开始，不直接改`results/`中的正式结果；
+5. 需要调试算法时，再进入对应Python实现或`surf_bev/`公共模块。
+
+整个项目的代码关系如下：
+
+| 阶段 | 一键/批处理入口 | 主要Python实现 | 关键输出 |
+|---|---|---|---|
+| 数据定位与校验 | `kitti_odometry_workstation_input.ps1` | PowerShell内部完成 | 图像、标定、pose、时间戳路径与数量检查 |
+| CLRNet检测与左右关联 | 由`run_surf_final_window_windows.ps1`调用 | `scan_clrnet_lane_counts.py`、`surf_bev/detectors.py` | `scan.json`、`selected_lane_points.json`、逐帧诊断图 |
+| IPM与pose对齐 | 同上 | `surf_bev/geometry.py` | 公共参考相机下的米制`X/Z`点 |
+| pose曲率与路段分类 | 同上；全量只扫pose可用`run_pose_curvature_all_sequences_windows.ps1` | `analyze_pose_curvature.py` | 曲率CSV、阈值JSON、直道/过渡/弯道分段图 |
+| 分窗口去噪、拟合与融合 | `run_adaptive_xz_piecewise_windows.ps1` | `fit_adaptive_xz_piecewise.py`、`fit_first5_two_curves.py` | 模型比较、窗口曲线、融合点、接口诊断 |
+| 遮挡缺口审计 | 由总控脚本调用 | `bridge_occluded_lane_segments.py` | 观测段、被拒缺口、低置信度虚线桥接 |
+| 固定定量评测 | `run_fixed_project_metrics_windows.ps1` | `evaluate_fixed_project_metrics.py` | Sequence 00–10指标CSV、JSON和总览图 |
+
+三个最常用入口：
+
+- 重跑155帧正式案例：`run_surf_final_sequence01_windows.ps1`；
+- 重跑Sequence 00–10全量实验：`run_surf_final_all_sequences_windows.ps1`；
+- 不重跑CLRNet、只重新汇总指标：`run_fixed_project_metrics_windows.ps1`。
+
+## 3. 打开方式
 
 ### PyCharm
 
@@ -31,7 +59,7 @@ Set-Location F:\surf_final
 Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass
 ```
 
-## 3. 顶层目录
+## 4. 顶层目录
 
 ### `CLRNet/`
 
@@ -54,11 +82,11 @@ CLRNet 每帧输出若干候选车道曲线；程序将每条候选采样为有�
 
 ### `scripts/`
 
-项目的可运行入口和实验实现，逐文件见第4节。
+项目的可运行入口和实验实现，逐文件见第5节。
 
 ### `surf_bev/`
 
-被脚本调用的共用运行模块，逐文件见第5节。最终工作区只保留实际依赖文件，旧的硬编码演示脚本不复制进来。
+被脚本调用的共用运行模块，逐文件见第6节。最终工作区只保留实际依赖文件，旧的硬编码演示脚本不复制进来。
 
 ### `results/`
 
@@ -74,7 +102,7 @@ CLRNet 每帧输出若干候选车道曲线；程序将每条候选采样为有�
 
 由工作区审计脚本生成的源码与CLRNet运行时备份。备份不包含体积较大的全量实验输出；正式输出继续保存在`workstation_outputs/`。
 
-## 4. `scripts/` 中每个文件的作用
+## 5. `scripts/` 中每个文件的作用
 
 ### A. 最终长路段主流程
 
@@ -186,7 +214,7 @@ RANSAC实验总入口，生成旧方法、候选改进方法、参数搜索和�
 
 直接运行已经选定的固定RANSAC配置，不再重新调参。输出可复现的RANSAC参考结果。
 
-## 5. `surf_bev/` 中每个文件的作用
+## 6. `surf_bev/` 中每个文件的作用
 
 #### `__init__.py`
 
@@ -212,7 +240,7 @@ RANSAC实验总入口，生成旧方法、候选改进方法、参数搜索和�
 
 保守的跨帧留一统计工具：某帧点只与其他帧同侧几何比较，避免用本帧自身证明本帧正确。它是诊断工具，不是最终长弯道主模型。
 
-## 6. 顶层文件
+## 7. 顶层文件
 
 #### `README_SURF_FINAL_ZH.md`
 
@@ -234,9 +262,9 @@ Windows工作站Python依赖版本清单。当前工作站继续使用已经验�
 
 由工作区创建脚本自动生成，记录源提交、CLRNet版本、复制内容和排除项，用于确认工作区来源。
 
-## 7. 正式运行
+## 8. 正式运行
 
-### 7.1 重跑155帧正式结果
+### 8.1 重跑155帧正式结果
 
 ```powershell
 & .\scripts\run_surf_final_sequence01_windows.ps1 `
@@ -245,7 +273,7 @@ Windows工作站Python依赖版本清单。当前工作站继续使用已经验�
   -Device cuda
 ```
 
-### 7.2 跑完整Sequence 01
+### 8.2 跑完整Sequence 01
 
 ```powershell
 & .\scripts\run_surf_final_sequence01_full_windows.ps1 `
@@ -256,7 +284,7 @@ Windows工作站Python依赖版本清单。当前工作站继续使用已经验�
 
 全序列会运行1101次CLRNet推理，时间明显长于155帧。运行期间看到`torch.load FutureWarning`不代表失败；应以最后的`SURF FULL SEQUENCE 01 EXPERIMENT FINISHED`和输出目录中的状态JSON为准。
 
-### Sequence 00–10全量运行
+### 8.3 跑Sequence 00–10全量实验
 
 ```powershell
 Set-Location F:\surf_final
@@ -270,7 +298,7 @@ Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass
 
 默认约处理23,201帧，所需时间远长于单个Sequence。脚本会复用已完成的Sequence 01，并在每个Sequence结束后写入批量进度。运行中断时，从控制台记录输出根目录，然后增加`-OutputRoot "该目录"`重新执行即可继续；只有明确需要全部重算时才加`-ForceRerun`。
 
-## 8. 每次结果目录
+## 9. 每次结果目录
 
 - `01_lane_detection_and_tracking/`：CLRNet候选、左右关联和点数据；
 - `02_pose_curvature/`：逐帧曲率、阈值、直道/过渡/弯道分段和图；
@@ -281,7 +309,7 @@ Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass
 - `FINAL_METRICS.json`：覆盖率、模型选择、接口通过率和桥接统计；
 - `final_seq...review_bundle.zip`：上传和汇报整理用压缩包。
 
-## 9. 当前正式结论
+## 10. 当前正式结论
 
 Sequence 01帧851–1005的直道阈值为`0.0021036211 1/m`，弯道阈值为`0.0033192514 1/m`。左侧观测覆盖100%，双侧覆盖94.2%，窗口侧拟合完成率93.3%，接口通过率96.2%。
 
